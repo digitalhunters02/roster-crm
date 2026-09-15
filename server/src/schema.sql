@@ -1,0 +1,115 @@
+-- Roster CRM schema
+-- Crestline Talent Partners — Austin, TX
+
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL,
+  initials TEXT NOT NULL,
+  color TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS clients (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_name TEXT NOT NULL,
+  industry TEXT NOT NULL,
+  contact_name TEXT NOT NULL,
+  contact_email TEXT NOT NULL,
+  contact_phone TEXT NOT NULL,
+  address TEXT NOT NULL,
+  owner_user_id INTEGER NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  title TEXT NOT NULL,
+  employment_type TEXT NOT NULL,
+  pay_range TEXT NOT NULL,
+  location TEXT NOT NULL,
+  status TEXT NOT NULL,
+  owner_user_id INTEGER NOT NULL REFERENCES users(id),
+  opened_date TEXT NOT NULL,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS candidates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  current_title TEXT NOT NULL,
+  current_employer TEXT NOT NULL,
+  skills TEXT NOT NULL,
+  resume_summary TEXT,
+  source TEXT NOT NULL,
+  owner_user_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS submissions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  candidate_id INTEGER NOT NULL REFERENCES candidates(id),
+  job_id INTEGER NOT NULL REFERENCES jobs(id),
+  stage TEXT NOT NULL,
+  owner_user_id INTEGER NOT NULL REFERENCES users(id),
+  submitted_date TEXT NOT NULL,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS interviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  submission_id INTEGER NOT NULL REFERENCES submissions(id),
+  interviewer_name TEXT NOT NULL,
+  scheduled_at TEXT NOT NULL,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS placements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  submission_id INTEGER NOT NULL REFERENCES submissions(id),
+  candidate_id INTEGER NOT NULL REFERENCES candidates(id),
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  job_id INTEGER NOT NULL REFERENCES jobs(id),
+  start_date TEXT NOT NULL,
+  end_date TEXT,
+  pay_rate REAL NOT NULL,
+  bill_rate REAL NOT NULL,
+  placement_fee REAL NOT NULL,
+  status TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS timesheets_invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  placement_id INTEGER NOT NULL REFERENCES placements(id),
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  hours REAL NOT NULL,
+  amount REAL NOT NULL,
+  status TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS activities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  related_type TEXT,
+  related_id INTEGER,
+  owner_user_id INTEGER NOT NULL REFERENCES users(id),
+  occurred_at TEXT NOT NULL,
+  notes TEXT
+);
+
+CREATE TABLE IF NOT EXISTS automations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  trigger_desc TEXT NOT NULL,
+  action_desc TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  runs_30d INTEGER NOT NULL DEFAULT 0
+);

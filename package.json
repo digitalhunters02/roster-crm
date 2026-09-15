@@ -1,0 +1,12 @@
+{
+  "name": "roster-crm",
+  "private": true,
+  "workspaces": ["server", "client"],
+  "scripts": {
+    "dev": "concurrently -n server,client -c yellow,cyan \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  }
+}

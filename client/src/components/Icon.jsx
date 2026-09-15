@@ -157,6 +157,11 @@ const ICONS = {
     ['path', 'M12 3 3 8l9 5 9-5-9-5Z'],
     ['path', 'M3 13l9 5 9-5'],
   ],
+  menu: [
+    ['line', 3, 6, 21, 6],
+    ['line', 3, 12, 21, 12],
+    ['line', 3, 18, 21, 18],
+  ],
 };
 
 export default function Icon({ name, size = 18, stroke = 'currentColor', strokeWidth = 1.8, className = '' }) {

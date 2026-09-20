@@ -28,6 +28,10 @@ const NAV = [
     ],
   },
   {
+    section: 'Messaging',
+    items: [{ to: '/whatsapp', label: 'WhatsApp', icon: 'phoneCall' }],
+  },
+  {
     section: 'System',
     items: [
       { to: '/automations', label: 'Automations', icon: 'zap' },

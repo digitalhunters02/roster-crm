@@ -113,3 +113,27 @@ CREATE TABLE IF NOT EXISTS automations (
   active INTEGER NOT NULL DEFAULT 1,
   runs_30d INTEGER NOT NULL DEFAULT 0
 );
+
+-- A single shared WhatsApp Business number for the whole company (staff share
+-- one connection rather than each connecting their own) — one row, id is always 1.
+CREATE TABLE IF NOT EXISTS whatsapp_connection (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  phone_number_id TEXT NOT NULL,
+  business_account_id TEXT,
+  access_token TEXT NOT NULL,
+  verify_token TEXT,
+  display_phone TEXT,
+  connected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT whatsapp_connection_single_row CHECK (id = 1)
+);
+
+CREATE TABLE IF NOT EXISTS whatsapp_messages (
+  id TEXT PRIMARY KEY,
+  wa_message_id TEXT UNIQUE,
+  contact_phone TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  body TEXT,
+  status TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_contact ON whatsapp_messages (contact_phone, created_at);

@@ -1,7 +1,8 @@
 // In local dev, "/api" is proxied to the local server (see vite.config.js).
 // In production there's no such proxy, so VITE_API_URL must point at the
 // deployed backend's base URL (e.g. https://roster-crm-api.onrender.com).
-const BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api';
+// Exported so Settings can show the exact webhook URL to paste into Meta's console.
+export const BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api';
 
 async function handle(r) {
   if (r.status === 204) return null;
@@ -95,6 +96,13 @@ export const api = {
   createAutomation: (body) => post('/automations', body),
   setAutomationActive: (id, active) => patch(`/automations/${id}/active`, { active }),
   deleteAutomation: (id) => del(`/automations/${id}`),
+
+  whatsappStatus: () => get('/integrations/whatsapp/status'),
+  whatsappConnect: (body) => post('/integrations/whatsapp/connect', body),
+  whatsappDisconnect: () => post('/integrations/whatsapp/disconnect', {}),
+  whatsappConversations: () => get('/integrations/whatsapp/conversations'),
+  whatsappConversation: (phone) => get(`/integrations/whatsapp/conversations/${encodeURIComponent(phone)}`),
+  whatsappSend: (to, text) => post('/integrations/whatsapp/send', { to, text }),
 };
 
 export default api;

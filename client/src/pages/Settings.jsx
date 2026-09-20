@@ -1,11 +1,81 @@
 import { useEffect, useRef, useState } from 'react';
-import api from '../api.js';
+import api, { BASE } from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
-  Card, CardHead, Avatar, Badge, Spinner, Button, IconButton, Field, TextInput, TextArea,
+  Card, CardHead, Avatar, Badge, Spinner, Button, IconButton, Field, TextInput, TextArea, Modal, FormError,
 } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { downloadCsv } from '../csv.js';
+
+const WHATSAPP_WEBHOOK_URL = `${BASE}/integrations/whatsapp/webhook`;
+
+function WhatsAppConnectForm({ onClose, onConnected }) {
+  const [form, setForm] = useState({ phoneNumberId: '', accessToken: '', businessAccountId: '', verifyToken: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  function set(key) {
+    return (e) => setForm((v) => ({ ...v, [key]: e.target.value }));
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!form.phoneNumberId.trim() || !form.accessToken.trim()) {
+      setError('Phone Number ID and Access Token are required.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.whatsappConnect({
+        phoneNumberId: form.phoneNumberId.trim(),
+        accessToken: form.accessToken.trim(),
+        businessAccountId: form.businessAccountId.trim() || undefined,
+        verifyToken: form.verifyToken.trim() || undefined,
+      });
+      onConnected(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="Connect WhatsApp"
+      sub="Paste credentials from Meta's developer console for your WhatsApp Business number."
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button onClick={submit} disabled={busy}>{busy ? 'Connecting…' : 'Connect'}</Button>
+        </>
+      }
+    >
+      <form onSubmit={submit}>
+        <FormError error={error} />
+        <Field label="Phone Number ID" required hint="From Meta's WhatsApp > API Setup page.">
+          <TextInput value={form.phoneNumberId} onChange={set('phoneNumberId')} placeholder="e.g. 109876543210987" />
+        </Field>
+        <Field label="Access Token" required hint="A permanent (system user) token is recommended over a 24-hour test token.">
+          <TextInput type="password" value={form.accessToken} onChange={set('accessToken')} placeholder="EAAG..." />
+        </Field>
+        <Field label="Business Account ID" hint="Optional — WhatsApp Business Account (WABA) ID.">
+          <TextInput value={form.businessAccountId} onChange={set('businessAccountId')} />
+        </Field>
+        <Field label="Verify Token" hint="Optional — a string you choose and also paste into Meta's webhook setup, below.">
+          <TextInput value={form.verifyToken} onChange={set('verifyToken')} placeholder="e.g. roster-verify" />
+        </Field>
+        <div className="rounded-md border border-line bg-wash px-3 py-2.5 mt-1">
+          <p className="text-xs font-semibold text-muted mb-1">Webhook callback URL</p>
+          <p className="text-xs text-ink break-all font-mono">{WHATSAPP_WEBHOOK_URL}</p>
+          <p className="text-xs text-faint mt-1.5">Paste this — plus the Verify Token above — into Meta's WhatsApp &gt; Configuration &gt; Webhook setup.</p>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 const PROFILE_KEY = 'roster-company-profile';
 const NOTIFICATIONS_KEY = 'roster-notifications-settings';
@@ -66,6 +136,29 @@ export default function Settings() {
 
   const [notifications, setNotifications] = useState(() => loadJson(NOTIFICATIONS_KEY, DEFAULT_NOTIFICATIONS));
 
+  const [waStatus, setWaStatus] = useState(null);
+  const [waModalOpen, setWaModalOpen] = useState(false);
+  const [waBusy, setWaBusy] = useState(false);
+
+  function refreshWhatsAppStatus() {
+    api.whatsappStatus().then(setWaStatus);
+  }
+
+  async function disconnectWhatsApp() {
+    setWaBusy(true);
+    try {
+      await api.whatsappDisconnect();
+      refreshWhatsAppStatus();
+    } finally {
+      setWaBusy(false);
+    }
+  }
+
+  function onWhatsAppConnected() {
+    setWaModalOpen(false);
+    refreshWhatsAppStatus();
+  }
+
   const fileRef = useRef(null);
   const [logo, setLogo] = useState(() => {
     try {
@@ -81,6 +174,7 @@ export default function Settings() {
     api.jobs().then(setJobs);
     api.clients().then(setClients);
     api.placements().then(setPlacements);
+    refreshWhatsAppStatus();
   }, []);
 
   function startEditProfile() {
@@ -273,6 +367,39 @@ export default function Settings() {
         </Card>
 
         <Card className="p-1">
+          <CardHead
+            title="WhatsApp Business"
+            sub="One shared number for the whole team"
+            action={
+              waStatus && waStatus.connected ? (
+                <Button variant="outline" size="sm" onClick={disconnectWhatsApp} disabled={waBusy}>
+                  {waBusy ? 'Disconnecting…' : 'Disconnect'}
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => setWaModalOpen(true)}>Connect</Button>
+              )
+            }
+          />
+          <div className="px-5 pb-5 text-sm">
+            {!waStatus && <p className="text-muted">Checking connection…</p>}
+            {waStatus && waStatus.connected && (
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-lg bg-greenTint text-green flex items-center justify-center flex-shrink-0">
+                  <Icon name="phoneCall" size={15} />
+                </span>
+                <div>
+                  <p className="font-semibold text-ink">Connected</p>
+                  <p className="text-xs text-muted">{waStatus.displayPhone || 'WhatsApp Business number'}</p>
+                </div>
+              </div>
+            )}
+            {waStatus && !waStatus.connected && (
+              <p className="text-muted">Not connected — paste your Meta WhatsApp Business credentials to start sending and receiving messages from the WhatsApp page.</p>
+            )}
+          </div>
+        </Card>
+
+        <Card className="p-1">
           <CardHead title="Data Export" sub="Download CSVs of your core records" />
           <div className="divide-y divide-lineSoft">
             <div className="flex items-center justify-between px-5 py-3.5">
@@ -294,6 +421,8 @@ export default function Settings() {
           </div>
         </Card>
       </div>
+
+      {waModalOpen && <WhatsAppConnectForm onClose={() => setWaModalOpen(false)} onConnected={onWhatsAppConnected} />}
     </Layout>
   );
 }

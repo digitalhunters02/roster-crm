@@ -3,6 +3,7 @@ import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { get, all, run, initSchema } from './db.js';
+import * as whatsapp from './whatsapp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
@@ -14,6 +15,24 @@ app.use(express.json());
 const PORT = process.env.PORT || 4350;
 
 const ar = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// -------------------- WhatsApp webhook (public) --------------------
+// Meta calls these directly (webhook verification handshake, then message
+// delivery), so they can't carry any auth. Unlike Harbor, this app has no
+// auth-gate middleware at all (every /api/* route is unauthenticated), so
+// there's no gate to place these ahead of — they're just declared first for
+// the same "public entry point" clarity Harbor's layout has.
+app.get('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
+  const conn = await whatsapp.getConnection();
+  const challenge = whatsapp.verifyWebhook(req.query, conn?.verify_token);
+  if (challenge) return res.status(200).send(challenge);
+  res.sendStatus(403);
+}));
+
+app.post('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
+  await whatsapp.handleWebhookEvent(req.body);
+  res.sendStatus(200);
+}));
 
 // -------------------- helpers --------------------
 function missingField(body, fields) {
@@ -556,6 +575,49 @@ app.delete('/api/automations/:id', ar(async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'not found' });
   await run(`DELETE FROM automations WHERE id = ?`, req.params.id);
   res.status(204).end();
+}));
+
+// -------------------- WhatsApp Business integration (one shared connection) --------------------
+app.get('/api/integrations/whatsapp/status', ar(async (req, res) => {
+  const conn = await whatsapp.getConnection();
+  res.json({ connected: !!conn, displayPhone: conn?.display_phone || null });
+}));
+
+app.post('/api/integrations/whatsapp/connect', ar(async (req, res) => {
+  const { phoneNumberId, accessToken, businessAccountId, verifyToken } = req.body || {};
+  if (!phoneNumberId || !accessToken) {
+    return res.status(400).json({ error: 'Phone Number ID and Access Token are required.' });
+  }
+  try {
+    const displayPhone = await whatsapp.saveConnection({ phoneNumberId, accessToken, businessAccountId, verifyToken });
+    res.json({ connected: true, displayPhone });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+}));
+
+app.post('/api/integrations/whatsapp/disconnect', ar(async (req, res) => {
+  await whatsapp.disconnect();
+  res.status(204).end();
+}));
+
+app.get('/api/integrations/whatsapp/conversations', ar(async (req, res) => {
+  res.json(await whatsapp.listConversations());
+}));
+
+app.get('/api/integrations/whatsapp/conversations/:phone', ar(async (req, res) => {
+  res.json(await whatsapp.getConversation(req.params.phone));
+}));
+
+app.post('/api/integrations/whatsapp/send', ar(async (req, res) => {
+  const { to, text } = req.body || {};
+  if (!to || !text) return res.status(400).json({ error: 'to and text are required' });
+  try {
+    await whatsapp.sendMessage(to, text);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 }));
 
 // -------------------- dashboard --------------------

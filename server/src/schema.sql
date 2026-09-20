@@ -2,7 +2,7 @@
 -- Crestline Talent Partners — Austin, TX
 
 CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT NOT NULL,
   role TEXT NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS clients (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   company_name TEXT NOT NULL,
   industry TEXT NOT NULL,
   contact_name TEXT NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS clients (
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   client_id INTEGER NOT NULL REFERENCES clients(id),
   title TEXT NOT NULL,
   employment_type TEXT NOT NULL,
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE TABLE IF NOT EXISTS candidates (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT NOT NULL,
   phone TEXT NOT NULL,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS candidates (
 );
 
 CREATE TABLE IF NOT EXISTS submissions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   candidate_id INTEGER NOT NULL REFERENCES candidates(id),
   job_id INTEGER NOT NULL REFERENCES jobs(id),
   stage TEXT NOT NULL,
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS submissions (
 );
 
 CREATE TABLE IF NOT EXISTS interviews (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   submission_id INTEGER NOT NULL REFERENCES submissions(id),
   interviewer_name TEXT NOT NULL,
   scheduled_at TEXT NOT NULL,
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS interviews (
 );
 
 CREATE TABLE IF NOT EXISTS placements (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   submission_id INTEGER NOT NULL REFERENCES submissions(id),
   candidate_id INTEGER NOT NULL REFERENCES candidates(id),
   client_id INTEGER NOT NULL REFERENCES clients(id),
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS placements (
 );
 
 CREATE TABLE IF NOT EXISTS timesheets_invoices (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   placement_id INTEGER NOT NULL REFERENCES placements(id),
   period_start TEXT NOT NULL,
   period_end TEXT NOT NULL,
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS timesheets_invoices (
 );
 
 CREATE TABLE IF NOT EXISTS activities (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   type TEXT NOT NULL,
   subject TEXT NOT NULL,
   related_type TEXT,
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 
 CREATE TABLE IF NOT EXISTS automations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   trigger_desc TEXT NOT NULL,
   action_desc TEXT NOT NULL,

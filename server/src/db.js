@@ -17,9 +17,17 @@ if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is required — set it to your Postgres connection string.');
 }
 
+// Managed hosts (Render, AWS, Neon, Supabase) require TLS; a Postgres on the
+// same VPS (Coolify's internal network) does not speak it, and forcing it
+// there makes the server crash-loop on boot. Opt in with PGSSLMODE=require
+// or sslmode=require in the URL for any other host.
+const useSsl =
+  /render\.com|amazonaws\.com|neon\.tech|supabase\.co/.test(process.env.DATABASE_URL) ||
+  process.env.PGSSLMODE === 'require';
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: useSsl ? { rejectUnauthorized: false } : undefined,
 });
 
 export async function initSchema() {

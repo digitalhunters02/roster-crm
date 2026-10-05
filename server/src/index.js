@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import * as whatsapp from './whatsapp.js';
 import { requireAuth, requireOwner, bootstrapOwner } from './auth.js';
 import { publicAuthRoutes, accountRoutes } from './authRoutes.js';
+import { mountAdminSummary } from './adminSummary.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
@@ -40,6 +41,9 @@ app.get('/api/health', ar(async (_req, res) => {
 }));
 
 publicAuthRoutes(app, ar);
+
+// Machine-to-machine: Harbor reads this with X-Admin-Key (see adminSummary.js).
+mountAdminSummary(app, ar, get);
 
 // -------------------- WhatsApp webhook (public) --------------------
 // Meta calls these directly (webhook verification handshake, then message

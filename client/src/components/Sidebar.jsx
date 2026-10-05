@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { Avatar } from './ui.jsx';
+import { useAuth } from '../auth/AuthContext.jsx';
+import { useT } from '../auth/i18n.js';
+import { LogOutIcon } from '../auth/AuthIcons.jsx';
 
 const LOGO_KEY = 'roster-company-logo';
 
@@ -55,6 +58,8 @@ function BrandMark({ logo, size = 32 }) {
 }
 
 export default function Sidebar() {
+  const { account, logout } = useAuth();
+  const { t } = useT();
   const [logo, setLogo] = useState(null);
   const [open, setOpen] = useState(false);
 
@@ -157,12 +162,24 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        <div className="px-4 py-4 border-t border-sideLine flex items-center gap-2.5 flex-shrink-0">
-          <Avatar name="Maya Solano" color="#5B4EE0" size={30} />
-          <div className="min-w-0 flex-grow">
-            <p className="text-[13px] font-semibold text-white truncate">Maya Solano</p>
-            <p className="text-[11px] text-sideMuted truncate">Managing Partner</p>
-          </div>
+        <div className="px-4 py-3.5 border-t border-sideLine flex items-center gap-2.5 flex-shrink-0">
+          <NavLink to="/settings" onClick={closeDrawer} title={t('accountTitle')} className="flex items-center gap-2.5 min-w-0 flex-grow">
+            <Avatar name={account?.name || 'Roster'} color="#5B4EE0" size={30} />
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-white truncate">{account?.name}</p>
+              <p className="text-[11px] text-sideMuted truncate">{account?.role === 'owner' ? t('owner') : t('staff')}</p>
+            </div>
+          </NavLink>
+          <button
+            type="button"
+            onClick={logout}
+            title={t('signOut')}
+            aria-label={t('signOut')}
+            data-testid="signout"
+            className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-md text-sideText hover:bg-side2 hover:text-white transition-colors"
+          >
+            <LogOutIcon />
+          </button>
         </div>
       </aside>
     </>

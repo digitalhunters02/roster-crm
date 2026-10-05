@@ -3,25 +3,49 @@ import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { get, all, run, initSchema } from './db.js';
+import crypto from 'node:crypto';
 import * as whatsapp from './whatsapp.js';
+import { requireAuth, requireOwner, bootstrapOwner } from './auth.js';
+import { publicAuthRoutes, accountRoutes } from './authRoutes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+// Behind Coolify's proxy: use the real client IP (login rate limit) and scheme.
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+// CORS_ORIGINS (comma separated) restricts cross-origin callers; unset keeps
+// the previous open behaviour. The app is same-origin in production and uses
+// bearer tokens (no cookies), so this is defence in depth.
+const corsOrigins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+app.use(cors(corsOrigins.length ? { origin: corsOrigins } : undefined));
+// rawBody is kept so the WhatsApp webhook signature can be verified.
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 const PORT = process.env.PORT || 4350;
 
 const ar = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// ==================== PUBLIC routes (no login) ====================
+// Everything registered before `app.use('/api', requireAuth)` below is
+// public. Keep this list short and intentional:
+//   GET  /api/health                              uptime / Coolify check
+//   POST /api/auth/login | forgot | reset         sign-in flow (rate limited)
+//   GET/POST /api/integrations/whatsapp/webhook   Meta calls these directly
+app.get('/api/health', ar(async (_req, res) => {
+  await get('SELECT 1');
+  res.json({ status: 'ok' });
+}));
+
+publicAuthRoutes(app, ar);
+
 // -------------------- WhatsApp webhook (public) --------------------
 // Meta calls these directly (webhook verification handshake, then message
-// delivery), so they can't carry any auth. Unlike Harbor, this app has no
-// auth-gate middleware at all (every /api/* route is unauthenticated), so
-// there's no gate to place these ahead of — they're just declared first for
-// the same "public entry point" clarity Harbor's layout has.
+// delivery), so they can't carry our bearer token. GET is guarded by the
+// verify token; POST is optionally guarded by Meta's X-Hub-Signature-256 when
+// WHATSAPP_APP_SECRET is set (unset = accepted as before).
 app.get('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
   const conn = await whatsapp.getConnection();
   const challenge = whatsapp.verifyWebhook(req.query, conn?.verify_token);
@@ -30,9 +54,21 @@ app.get('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
 }));
 
 app.post('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
+  const secret = process.env.WHATSAPP_APP_SECRET;
+  if (secret) {
+    const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(req.rawBody || '').digest('hex');
+    const got = String(req.headers['x-hub-signature-256'] || '');
+    const a = Buffer.from(expected);
+    const b = Buffer.from(got);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.sendStatus(403);
+  }
   await whatsapp.handleWebhookEvent(req.body);
   res.sendStatus(200);
 }));
+
+// ==================== everything below requires a login ====================
+app.use('/api', requireAuth);
+accountRoutes(app, ar);
 
 // -------------------- helpers --------------------
 function missingField(body, fields) {
@@ -583,7 +619,7 @@ app.get('/api/integrations/whatsapp/status', ar(async (req, res) => {
   res.json({ connected: !!conn, displayPhone: conn?.display_phone || null });
 }));
 
-app.post('/api/integrations/whatsapp/connect', ar(async (req, res) => {
+app.post('/api/integrations/whatsapp/connect', requireOwner, ar(async (req, res) => {
   const { phoneNumberId, accessToken, businessAccountId, verifyToken } = req.body || {};
   if (!phoneNumberId || !accessToken) {
     return res.status(400).json({ error: 'Phone Number ID and Access Token are required.' });
@@ -596,7 +632,7 @@ app.post('/api/integrations/whatsapp/connect', ar(async (req, res) => {
   }
 }));
 
-app.post('/api/integrations/whatsapp/disconnect', ar(async (req, res) => {
+app.post('/api/integrations/whatsapp/disconnect', requireOwner, ar(async (req, res) => {
   await whatsapp.disconnect();
   res.status(204).end();
 }));
@@ -746,7 +782,17 @@ app.get(/^(?!\/api).*/, (_req, res) => {
   res.sendFile(path.join(CLIENT_DIST, 'index.html'));
 });
 
+// Unknown /api paths (only reachable when signed in) and unhandled errors.
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
+app.use((err, _req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.error(err);
+  res.status(status).json({ error: status >= 500 ? 'Internal server error' : err.message });
+});
+
 initSchema()
+  .then(() => bootstrapOwner())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Roster API listening on http://localhost:${PORT}`);

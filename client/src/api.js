@@ -1,3 +1,5 @@
+import { authHeaders, handleUnauthorized } from './auth/session.js';
+
 // In local dev, "/api" is proxied to the local server (see vite.config.js).
 // In production there's no such proxy, so VITE_API_URL must point at the
 // deployed backend's base URL (e.g. https://roster-crm-api.onrender.com).
@@ -5,6 +7,8 @@
 export const BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api';
 
 async function handle(r) {
+  // A rejected session (expired, password changed elsewhere) signs the user out.
+  if (r.status === 401) handleUnauthorized();
   if (r.status === 204) return null;
   const data = await r.json().catch(() => null);
   if (!r.ok) {
@@ -17,13 +21,13 @@ async function handle(r) {
 }
 
 function get(path) {
-  return fetch(BASE + path).then(handle);
+  return fetch(BASE + path, { headers: authHeaders() }).then(handle);
 }
 
 function post(path, body) {
   return fetch(BASE + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   }).then(handle);
 }
@@ -31,7 +35,7 @@ function post(path, body) {
 function put(path, body) {
   return fetch(BASE + path, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   }).then(handle);
 }
@@ -39,13 +43,13 @@ function put(path, body) {
 function patch(path, body) {
   return fetch(BASE + path, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   }).then(handle);
 }
 
 function del(path) {
-  return fetch(BASE + path, { method: 'DELETE' }).then(handle);
+  return fetch(BASE + path, { method: 'DELETE', headers: authHeaders() }).then(handle);
 }
 
 export const api = {

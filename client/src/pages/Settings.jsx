@@ -6,6 +6,8 @@ import {
 } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { downloadCsv } from '../csv.js';
+import { useAuth } from '../auth/AuthContext.jsx';
+import { MyAccountCard, StaffCard } from '../auth/AccountPanel.jsx';
 
 const WHATSAPP_WEBHOOK_URL = `${BASE}/integrations/whatsapp/webhook`;
 
@@ -123,6 +125,7 @@ function saveJson(key, value) {
 }
 
 export default function Settings() {
+  const { account } = useAuth();
   const [users, setUsers] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -252,6 +255,8 @@ export default function Settings() {
   return (
     <Layout title="Settings">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <MyAccountCard />
+        {account?.role === 'owner' && <StaffCard />}
         <Card className="p-1">
           <CardHead
             title="Agency Profile"

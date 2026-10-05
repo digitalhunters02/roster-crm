@@ -137,3 +137,20 @@ CREATE TABLE IF NOT EXISTS whatsapp_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_contact ON whatsapp_messages (contact_phone, created_at);
+
+-- Login accounts (separate from "users", which are the agency's recruiters
+-- shown on the Team card). Owner / staff roles; bcrypt password hashes.
+CREATE TABLE IF NOT EXISTS accounts (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'staff',
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+  token_version INTEGER NOT NULL DEFAULT 0,
+  reset_token_hash TEXT,
+  reset_token_expires TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_lower_idx ON accounts (lower(email));
+CREATE INDEX IF NOT EXISTS accounts_reset_token_idx ON accounts (reset_token_hash);

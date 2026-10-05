@@ -137,7 +137,10 @@ export async function bootstrapOwner() {
     console.error(`BOOTSTRAP_OWNER_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters: bootstrap skipped.`);
     return;
   }
-  if (await accountByEmail(email)) return;
+  if (await accountByEmail(email)) {
+    console.log(`bootstrap owner already exists for ${email}`);
+    return;
+  }
   const name = (process.env.BOOTSTRAP_OWNER_NAME || '').trim() || 'Owner';
   const r = await run(
     `INSERT INTO accounts (name, email, password_hash, role) VALUES ($1, $2, $3, 'owner')

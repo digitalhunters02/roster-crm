@@ -266,6 +266,7 @@ test('bootstrap is idempotent: restart with a different env password keeps the r
   await main.stop();
   const again = await startServer({ BOOTSTRAP_OWNER_PASSWORD: 'Different-env-pass-9' });
   assert.ok(!/bootstrap owner created/.test(again.logs()), 'nothing created on the second boot');
+  assert.match(again.logs(), new RegExp(`bootstrap owner already exists for ${OWNER_EMAIL}`));
   const db = new pg.Client({ connectionString: DB_URL });
   await db.connect();
   const n = await db.query(`SELECT COUNT(*)::int AS n FROM accounts WHERE lower(email) = $1`, [OWNER_EMAIL]);

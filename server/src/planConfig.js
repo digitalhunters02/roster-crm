@@ -15,12 +15,20 @@ export const FEATURE_MIN_PLAN = {
   placements: 'essencial',
   timesheets: 'essencial',
   reports: 'essencial',
+  careers: 'essencial',
+  resume_ai: 'essencial',
+  margin: 'completo',
+  hours_export: 'completo',
+  hours_portal: 'completo',
   automations: 'completo',
   whatsapp: 'completo',
 };
 // Rotas da API protegidas por plano: [prefixo, recurso]. Valem só depois do login.
 export const API_GATES = [
   ['/api/placements', 'placements'],
+  ['/api/candidates/parse-resume', 'resume_ai'],
+  ['/api/timesheets/margin', 'margin'],
+  ['/api/timesheets/export', 'hours_export'],
   ['/api/timesheets', 'timesheets'],
   ['/api/reports', 'reports'],
   ['/api/automations', 'automations'],

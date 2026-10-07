@@ -9,6 +9,30 @@ import { downloadCsv } from '../csv.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { MyAccountCard, StaffCard } from '../auth/AccountPanel.jsx';
 import PlansCard from '../plans/PlansCard.jsx';
+import { usePlan } from '../plans/PlanContext.jsx';
+
+function CareersLinkCard() {
+  const { allows } = usePlan();
+  const on = allows('careers');
+  const url = `${window.location.origin}/#/careers`;
+  const [copied, setCopied] = useState(false);
+  return (
+    <Card className="p-1">
+      <CardHead title="Careers page" sub="A public page listing your open jobs. Applicants land in the pipeline as Sourced." />
+      <div className="px-4 pb-4">
+        {on ? (
+          <>
+            <input readOnly value={url} onFocus={(e) => e.target.select()} aria-label="Careers page link" className="w-full rounded-lg border border-line bg-wash px-3 py-2 text-xs text-ink" />
+            <div className="mt-2 flex gap-2">
+              <Button variant="brand" size="sm" onClick={() => navigator.clipboard?.writeText(url).then(() => setCopied(true)).catch(() => {})}>{copied ? 'Copied' : 'Copy link'}</Button>
+              <a className="inline-flex items-center rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-wash" href={url} target="_blank" rel="noreferrer">Open page</a>
+            </div>
+          </>
+        ) : <p className="text-sm text-muted">Included in the Essential plan and above.</p>}
+      </div>
+    </Card>
+  );
+}
 
 const WHATSAPP_WEBHOOK_URL = `${BASE}/integrations/whatsapp/webhook`;
 
@@ -259,6 +283,7 @@ export default function Settings() {
         <MyAccountCard />
         {account?.role === 'owner' && <StaffCard />}
         <PlansCard />
+        <CareersLinkCard />
         <Card className="p-1">
           <CardHead
             title="Agency Profile"

@@ -8,6 +8,9 @@ import {
 import Icon from '../components/Icon.jsx';
 import { money, shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
+import { usePlan } from '../plans/PlanContext.jsx';
+import { LockIcon } from '../plans/PlanGate.jsx';
+import { Link } from 'react-router-dom';
 
 const STATUS_TONE = { Draft: 'neutral', Sent: 'blue', Paid: 'green', Overdue: 'rose' };
 const STATUS_OPTIONS = ['Draft', 'Sent', 'Paid', 'Overdue'];
@@ -66,7 +69,83 @@ function TimesheetForm({ initial, placements, onCancel, onSubmit, saving, error 
   );
 }
 
+function MarginCard() {
+  const { allows } = usePlan();
+  const [m, setM] = useState(null);
+  const [err, setErr] = useState(null);
+  const on = allows('margin');
+  useEffect(() => { if (on) api.timesheetsMargin().then(setM).catch((e) => setErr(e.message)); }, [on]);
+  async function download() {
+    try {
+      const blob = await api.timesheetsExportBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'roster-hours.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch (e) { setErr(e.message); }
+  }
+  if (!on) {
+    return (
+      <Card className="p-4 mb-4 flex flex-wrap items-center gap-3" data-testid="margin-locked">
+        <span className="w-9 h-9 rounded-full bg-brandTint text-brand flex items-center justify-center"><LockIcon size={16} /></span>
+        <div className="flex-1 min-w-[200px]">
+          <div className="text-sm font-semibold text-ink">Margin per client, hours export and client approval link</div>
+          <div className="text-xs text-muted">See what you earn on every hour worked and let clients approve hours online. Included in the Complete plan.</div>
+        </div>
+        <Link to="/settings" className="text-sm font-semibold text-brand hover:underline">See plans</Link>
+      </Card>
+    );
+  }
+  if (!m) return err ? <p className="text-sm text-rose mb-4">{err}</p> : null;
+  const t = m.totals;
+  return (
+    <Card className="p-4 mb-4" data-testid="margin-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="text-sm font-semibold text-ink">Margin per client</div>
+        <Button variant="outline" size="sm" onClick={download}><Icon name="download" size={14} /> Hours + margin (CSV)</Button>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        {[['Billed', money(t.billed)], ['Paid to staff', money(t.cost)], ['Margin', money(t.margin)], ['Margin %', `${t.margin_pct}%`]].map(([k, v]) => (
+          <div key={k} className="rounded-lg bg-wash px-3 py-2"><div className="text-[11px] text-muted">{k}</div><div className="text-base font-semibold text-ink">{v}</div></div>
+        ))}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="text-left text-[11px] text-muted"><th className="py-1 pr-3">Client</th><th className="pr-3">Hours</th><th className="pr-3">Billed</th><th className="pr-3">Margin</th></tr></thead>
+          <tbody>{m.byClient.map((c) => (
+            <tr key={c.client} className="border-t border-line"><td className="py-1.5 pr-3 text-ink">{c.client}</td><td className="pr-3">{c.hours}</td><td className="pr-3">{money(c.billed)}</td><td className="pr-3 font-medium">{money(c.margin)}</td></tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {err && <p className="text-xs text-rose mt-2">{err}</p>}
+    </Card>
+  );
+}
+
+function ApprovalLinkModal({ row, onClose }) {
+  const [url, setUrl] = useState(null);
+  const [err, setErr] = useState(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { api.timesheetApprovalLink(row.id).then((r) => setUrl(r.url)).catch((e) => setErr(e.message)); }, [row.id]);
+  const copy = () => { navigator.clipboard?.writeText(url).then(() => setCopied(true)).catch(() => {}); };
+  return (
+    <Modal title="Client approval link" sub={`${row.candidate_name} · ${row.client_name}`} onClose={onClose}
+      footer={<Button variant="outline" onClick={onClose}>Close</Button>}>
+      <FormError error={err} />
+      {!url && !err && <Spinner />}
+      {url && (
+        <>
+          <p className="text-sm text-muted mb-2">Send this link to the client. They review the hours and approve or reject — no login needed. Creating a new link cancels the old one.</p>
+          <input readOnly value={url} onFocus={(e) => e.target.select()} className="w-full rounded-lg border border-line bg-wash px-3 py-2 text-xs text-ink" aria-label="Approval link" />
+          <div className="mt-3"><Button variant="brand" size="sm" onClick={copy}>{copied ? 'Copied' : 'Copy link'}</Button></div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 export default function Timesheets() {
+  const { allows } = usePlan();
+  const [linkRow, setLinkRow] = useState(null);
   const [rows, setRows] = useState(null);
   const [placements, setPlacements] = useState([]);
   const [modal, setModal] = useState(null);
@@ -150,6 +229,15 @@ export default function Timesheets() {
     { key: 'hours', header: 'Hours', render: (r) => r.hours },
     { key: 'amount', header: 'Amount', render: (r) => <span className="font-medium">{money(r.amount)}</span> },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
+    ...(allows('hours_portal') ? [{
+      key: 'approval', header: 'Client',
+      render: (r) => (
+        <div className="flex items-center gap-2">
+          {r.approval_decision && <Badge tone={r.approval_decision === 'approved' ? 'green' : 'rose'}>{r.approval_decision === 'approved' ? 'Approved' : 'Rejected'}</Badge>}
+          <Button variant="ghost" size="sm" onClick={() => setLinkRow(r)}>{r.approval_decision ? 'New link' : 'Approval link'}</Button>
+        </div>
+      ),
+    }] : []),
     {
       key: 'actions', header: '', className: 'w-20',
       render: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />,
@@ -167,9 +255,11 @@ export default function Timesheets() {
         </>
       }
     >
+      <MarginCard />
       <Card>
         <Table cols={cols} rows={rows} />
       </Card>
+      {linkRow && <ApprovalLinkModal row={linkRow} onClose={() => { setLinkRow(null); load(); }} />}
 
       {modal && (
         <TimesheetForm

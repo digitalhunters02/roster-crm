@@ -14,6 +14,7 @@ import WhatsApp from './pages/WhatsApp.jsx';
 import Login from './pages/Login.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
 import { Terms, Privacy } from './pages/Legal.jsx';
+import { Careers, Approve } from './pages/PublicPages.jsx';
 import PlanGate from './plans/PlanGate.jsx';
 import { useAuth } from './auth/AuthContext.jsx';
 import ForcedPasswordChange from './auth/ForcedPasswordChange.jsx';
@@ -34,6 +35,8 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route path="/careers" element={<Careers />} />
+        <Route path="/approve/:token" element={<Approve />} />
         <Route path="*" element={<Login />} />
       </Routes>
     );
@@ -47,6 +50,8 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />
+      <Route path="/careers" element={<Careers />} />
+      <Route path="/approve/:token" element={<Approve />} />
       <Route path="/" element={<Dashboard />} />
       <Route path="/candidates" element={<Candidates />} />
       <Route path="/jobs" element={<Jobs />} />

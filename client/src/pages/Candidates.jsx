@@ -8,9 +8,10 @@ import {
 import Icon from '../components/Icon.jsx';
 import { shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
+import { usePlan } from '../plans/PlanContext.jsx';
 
-const SOURCE_TONE = { LinkedIn: 'blue', Referral: 'green', 'Job Board': 'amber', Sourced: 'brand' };
-const SOURCE_OPTIONS = ['LinkedIn', 'Referral', 'Job Board', 'Sourced'];
+const SOURCE_TONE = { 'Careers page': 'teal', LinkedIn: 'blue', Referral: 'green', 'Job Board': 'amber', Sourced: 'brand' };
+const SOURCE_OPTIONS = ['Careers page', 'LinkedIn', 'Referral', 'Job Board', 'Sourced'];
 
 const EMPTY = {
   name: '', email: '', phone: '', current_title: '', current_employer: '', skills: '',
@@ -20,6 +21,23 @@ const EMPTY = {
 function CandidateForm({ initial, users, onCancel, onSubmit, saving, error }) {
   const [values, setValues] = useState(initial);
   const set = (k) => (e) => setValues((v) => ({ ...v, [k]: e.target.value }));
+  const { allows } = usePlan();
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiText, setAiText] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState(null);
+  async function readResume() {
+    setAiBusy(true); setAiErr(null);
+    try {
+      const r = await api.parseResume(aiText);
+      setValues((v) => {
+        const next = { ...v };
+        for (const k of ['name', 'email', 'phone', 'current_title', 'current_employer', 'skills', 'resume_summary']) if (r[k]) next[k] = r[k];
+        return next;
+      });
+      setAiOpen(false); setAiText('');
+    } catch (e) { setAiErr(e.message); } finally { setAiBusy(false); }
+  }
 
   return (
     <Modal
@@ -34,6 +52,23 @@ function CandidateForm({ initial, users, onCancel, onSubmit, saving, error }) {
       }
     >
       <FormError error={error} />
+      {allows('resume_ai') && (
+        <div className="mb-4 rounded-lg border border-line bg-wash p-3">
+          {!aiOpen ? (
+            <button type="button" className="text-sm font-semibold text-brand hover:underline" onClick={() => setAiOpen(true)}>✨ Fill from a pasted resume (AI)</button>
+          ) : (
+            <>
+              <FormError error={aiErr} />
+              <TextArea rows={5} value={aiText} onChange={(e) => setAiText(e.target.value)} placeholder="Paste the resume text here…" aria-label="Resume text" />
+              <div className="mt-2 flex gap-2">
+                <Button size="sm" variant="brand" onClick={readResume} disabled={aiBusy || aiText.trim().length < 40}>{aiBusy ? 'Reading…' : 'Read resume'}</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setAiOpen(false); setAiErr(null); }}>Cancel</Button>
+              </div>
+              <p className="text-[11px] text-muted mt-1.5">Review the fields afterwards — the AI can make mistakes.</p>
+            </>
+          )}
+        </div>
+      )}
       <FormGrid>
         <Field label="Full name" required>
           <TextInput value={values.name} onChange={set('name')} placeholder="Jasmine Whitfield" />

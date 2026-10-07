@@ -99,6 +99,18 @@ export const api = {
   updateTimesheet: (id, body) => put(`/timesheets/${id}`, body),
   deleteTimesheet: (id) => del(`/timesheets/${id}`),
 
+  parseResume: (text) => post('/candidates/parse-resume', { text }),
+  timesheetsMargin: (from, to) => get(`/timesheets/margin${from || to ? `?from=${from || ''}&to=${to || ''}` : ''}`),
+  timesheetsExportBlob: (from, to) => fetch(`${BASE}/timesheets/export${from || to ? `?from=${from || ''}&to=${to || ''}` : ''}`, { headers: authHeaders() })
+    .then(async (r) => { if (r.status === 401) handleUnauthorized(); if (!r.ok) { const d = await r.json().catch(() => null); const e = new Error((d && d.error) || `Request failed (${r.status})`); e.status = r.status; throw e; } return r.blob(); }),
+  timesheetApprovalLink: (id) => post(`/timesheets/${id}/approval-link`, {}),
+
+  // públicas (sem login)
+  publicCareers: () => fetch(`${BASE}/public/careers`).then(handle),
+  publicApply: (jobId, body) => fetch(`${BASE}/public/careers/${jobId}/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(handle),
+  publicApproval: (token) => fetch(`${BASE}/public/approval/${encodeURIComponent(token)}`).then(handle),
+  publicDecide: (token, body) => fetch(`${BASE}/public/approval/${encodeURIComponent(token)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(handle),
+
   activities: () => get('/activities'),
 
   automations: () => get('/automations'),

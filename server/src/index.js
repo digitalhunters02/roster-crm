@@ -10,6 +10,7 @@ import { publicAuthRoutes, accountRoutes } from './authRoutes.js';
 import { mountAdminSummary } from './adminSummary.js';
 import * as billing from './billing.js';
 import { mountBillingWebhook, mountBilling } from './billingRoutes.js';
+import { mountRosterPublic, mountRosterPro } from './rosterPro.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
@@ -49,6 +50,7 @@ mountAdminSummary(app, ar, get, billing.getAdminSummary);
 
 // Stripe da Impact Digital chama este webhook direto (assinatura conferida em billing.js).
 mountBillingWebhook(app, ar);
+mountRosterPublic(app);
 
 // -------------------- WhatsApp webhook (public) --------------------
 // Meta calls these directly (webhook verification handshake, then message
@@ -82,6 +84,7 @@ accountRoutes(app, ar);
 // Plano e cobrança: status para todos, escolher plano só o dono; depois, as barreiras por plano de cada rota.
 mountBilling(app, ar, requireOwner);
 app.use(billing.planGates());
+mountRosterPro(app);
 
 // -------------------- helpers --------------------
 function missingField(body, fields) {

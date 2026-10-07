@@ -164,3 +164,11 @@ CREATE TABLE IF NOT EXISTS subscription (
   stripe_subscription_id TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Aprovação das horas pelo cliente (link sem login) — ver rosterPro.js
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approval_token TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approval_decision TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approved_at TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approved_by TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approval_note TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS timesheets_approval_token_idx ON timesheets_invoices (approval_token) WHERE approval_token IS NOT NULL;

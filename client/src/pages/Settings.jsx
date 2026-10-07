@@ -8,6 +8,7 @@ import Icon from '../components/Icon.jsx';
 import { downloadCsv } from '../csv.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { MyAccountCard, StaffCard } from '../auth/AccountPanel.jsx';
+import PlansCard from '../plans/PlansCard.jsx';
 
 const WHATSAPP_WEBHOOK_URL = `${BASE}/integrations/whatsapp/webhook`;
 
@@ -257,6 +258,7 @@ export default function Settings() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <MyAccountCard />
         {account?.role === 'owner' && <StaffCard />}
+        <PlansCard />
         <Card className="p-1">
           <CardHead
             title="Agency Profile"

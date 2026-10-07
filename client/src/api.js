@@ -53,6 +53,11 @@ function del(path) {
 }
 
 export const api = {
+  // ---- plano e cobrança ----
+  billingStatus: () => get('/billing/status'),
+  billingCheckout: (plan, interval = 'month') => post('/billing/checkout', { plan, interval }),
+  billingPortal: () => post('/billing/portal', {}),
+
   dashboard: () => get('/dashboard'),
   reports: () => get('/reports'),
 

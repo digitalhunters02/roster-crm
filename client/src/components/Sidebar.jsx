@@ -5,6 +5,8 @@ import { Avatar } from './ui.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { useT } from '../auth/i18n.js';
 import { LogOutIcon } from '../auth/AuthIcons.jsx';
+import { usePlan } from '../plans/PlanContext.jsx';
+import { LockIcon } from '../plans/PlanGate.jsx';
 
 const LOGO_KEY = 'roster-company-logo';
 
@@ -26,19 +28,19 @@ const NAV = [
   {
     section: 'Placements',
     items: [
-      { to: '/placements', label: 'Placements', icon: 'badge' },
-      { to: '/timesheets', label: 'Timesheets & Invoicing', icon: 'receipt' },
+      { to: '/placements', label: 'Placements', icon: 'badge', feature: 'placements' },
+      { to: '/timesheets', label: 'Timesheets & Invoicing', icon: 'receipt', feature: 'timesheets' },
     ],
   },
   {
     section: 'Messaging',
-    items: [{ to: '/whatsapp', label: 'WhatsApp', icon: 'phoneCall' }],
+    items: [{ to: '/whatsapp', label: 'WhatsApp', icon: 'phoneCall', feature: 'whatsapp' }],
   },
   {
     section: 'System',
     items: [
-      { to: '/automations', label: 'Automations', icon: 'zap' },
-      { to: '/reports', label: 'Reports', icon: 'barChart' },
+      { to: '/automations', label: 'Automations', icon: 'zap', feature: 'automations' },
+      { to: '/reports', label: 'Reports', icon: 'barChart', feature: 'reports' },
       { to: '/settings', label: 'Settings', icon: 'sliders' },
     ],
   },
@@ -60,6 +62,7 @@ function BrandMark({ logo, size = 32 }) {
 export default function Sidebar() {
   const { account, logout } = useAuth();
   const { t } = useT();
+  const { allows } = usePlan();
   const [logo, setLogo] = useState(null);
   const [open, setOpen] = useState(false);
 
@@ -153,6 +156,7 @@ export default function Sidebar() {
                         )}
                         <Icon name={item.icon} size={16} stroke={isActive ? '#B9AFF7' : '#8A82B8'} />
                         {item.label}
+                        {item.feature && !allows(item.feature) && <LockIcon size={12} className="ml-auto text-sideMuted" />}
                       </>
                     )}
                   </NavLink>

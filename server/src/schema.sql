@@ -154,3 +154,13 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_lower_idx ON accounts (lower(email));
 CREATE INDEX IF NOT EXISTS accounts_reset_token_idx ON accounts (reset_token_hash);
+
+-- Plano e assinatura desta instalação (uma linha só): ver billing.js
+CREATE TABLE IF NOT EXISTS subscription (
+  id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  plan TEXT NOT NULL DEFAULT 'basico',
+  status TEXT NOT NULL DEFAULT 'active',
+  stripe_customer_id TEXT,
+  stripe_subscription_id TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

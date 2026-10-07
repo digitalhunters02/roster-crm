@@ -14,6 +14,7 @@ import WhatsApp from './pages/WhatsApp.jsx';
 import Login from './pages/Login.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
 import { Terms, Privacy } from './pages/Legal.jsx';
+import PlanGate from './plans/PlanGate.jsx';
 import { useAuth } from './auth/AuthContext.jsx';
 import ForcedPasswordChange from './auth/ForcedPasswordChange.jsx';
 import { useT } from './auth/i18n.js';
@@ -52,11 +53,11 @@ export default function App() {
       <Route path="/pipeline" element={<Pipeline />} />
       <Route path="/interviews" element={<Interviews />} />
       <Route path="/clients" element={<Clients />} />
-      <Route path="/placements" element={<Placements />} />
-      <Route path="/timesheets" element={<Timesheets />} />
-      <Route path="/automations" element={<Automations />} />
-      <Route path="/reports" element={<Reports />} />
-      <Route path="/whatsapp" element={<WhatsApp />} />
+      <Route path="/placements" element={<PlanGate feature="placements" title="Placements"><Placements /></PlanGate>} />
+      <Route path="/timesheets" element={<PlanGate feature="timesheets" title="Timesheets & Invoicing"><Timesheets /></PlanGate>} />
+      <Route path="/automations" element={<PlanGate feature="automations" title="Automations"><Automations /></PlanGate>} />
+      <Route path="/reports" element={<PlanGate feature="reports" title="Reports"><Reports /></PlanGate>} />
+      <Route path="/whatsapp" element={<PlanGate feature="whatsapp" title="WhatsApp"><WhatsApp /></PlanGate>} />
       <Route path="/settings" element={<Settings />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

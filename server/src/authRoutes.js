@@ -1,5 +1,6 @@
 // /api/auth/* (public: login, forgot, reset) plus the authenticated account
 // endpoints (me, change-password) and owner-only staff management.
+import * as billing from './billing.js';
 import crypto from 'node:crypto';
 import { get, all, run } from './db.js';
 import {
@@ -160,6 +161,12 @@ export function accountRoutes(app, ar) {
     if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Enter a valid email address', code: 'invalid_email' });
     if (password.length < MIN_PASSWORD_LENGTH) {
       return res.status(400).json({ error: `Temporary password must be at least ${MIN_PASSWORD_LENGTH} characters`, code: 'weak_password' });
+    }
+    // Limite de logins do plano (o dono conta como 1).
+    const limit = await billing.userLimit();
+    const { n: have } = await get(`SELECT COUNT(*)::int AS n FROM accounts`);
+    if (have >= limit) {
+      return res.status(402).json({ error: `Your plan allows up to ${limit} staff logins. Upgrade your plan to add more.`, code: 'user_limit', userLimit: limit });
     }
     const r = await run(
       `INSERT INTO accounts (name, email, password_hash, role, must_change_password)

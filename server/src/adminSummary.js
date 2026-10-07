@@ -8,12 +8,14 @@ import crypto from 'node:crypto';
 const digest = (v) => crypto.createHash('sha256').update(String(v ?? '')).digest();
 export const safeEqual = (a, b) => crypto.timingSafeEqual(digest(a), digest(b));
 
-export function mountAdminSummary(app, ar, get) {
+export function mountAdminSummary(app, ar, get, getBillingSummary) {
   app.get('/api/admin-summary', ar(async (req, res) => {
     const adminKey = process.env.ADMIN_SUMMARY_KEY;
     if (!adminKey) return res.status(503).json({ error: 'ADMIN_SUMMARY_KEY is not configured on this server.' });
     if (!safeEqual(req.headers['x-admin-key'], adminKey)) return res.status(401).json({ error: 'Not authorized.' });
     const row = await get('SELECT COUNT(*) AS n FROM accounts');
-    res.json({ subscribers: [], billingEnabled: false, accounts: Number(row?.n) || 0 });
+    // Com cobrança própria (billing.js), devolve a assinatura real desta instalação; sem ela, lista vazia.
+    const summary = getBillingSummary ? await getBillingSummary() : { subscribers: [], billingEnabled: false };
+    res.json({ ...summary, accounts: Number(row?.n) || 0 });
   }));
 }

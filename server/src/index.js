@@ -2,12 +2,15 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { get, all, run, initSchema } from './db.js';
+import pool, { get, all, run, initSchema } from './db.js';
 import crypto from 'node:crypto';
 import * as whatsapp from './whatsapp.js';
 import { requireAuth, requireOwner, bootstrapOwner } from './auth.js';
 import { publicAuthRoutes, accountRoutes } from './authRoutes.js';
 import { mountAdminSummary } from './adminSummary.js';
+import { createPhotoImportRouter, initPhotoImportSchema, startPhotoBilling } from './photoImportRouter.js';
+import { effectivePlan, getSubscription } from './photoPlan.js';
+import { sendNoticeEmail } from './mailer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
@@ -72,6 +75,15 @@ app.post('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
 
 // ==================== everything below requires a login ====================
 app.use('/api', requireAuth);
+
+// "Importar de foto" (AI reads a photo/print, the person reviews before saving) + extra use by credits.
+app.use('/api/photo-import', createPhotoImportRouter({
+  pool, requireAuth, requireAdmin: requireOwner, effectivePlan, getSubscription,
+  planLimits: { basico: 0, essencial: 100, completo: 500 },
+  kindsOpts: { contactTypes: ['business'], disableKinds: ['leads', 'expense'], clientsPage: 'clients' },
+  adminWhere: "role = 'owner'", isAdmin: (a) => a?.role === 'owner',
+  appName: 'Roster', sendNotice: sendNoticeEmail,
+}));
 accountRoutes(app, ar);
 
 // -------------------- helpers --------------------
@@ -796,11 +808,13 @@ app.use((err, _req, res, next) => {
 });
 
 initSchema()
+  .then(() => initPhotoImportSchema(pool))
   .then(() => bootstrapOwner())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Roster API listening on http://localhost:${PORT}`);
     });
+    startPhotoBilling({ pool, getSubscription });
   })
   .catch((err) => {
     console.error('Failed to initialize database schema:', err);

@@ -7,6 +7,7 @@ import {
 } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { downloadCsv } from '../csv.js';
+import PhotoImportButton from '../components/PhotoImportButton.jsx';
 
 const STATUS_TONE = { Active: 'green', Prospect: 'amber', Inactive: 'neutral' };
 const STATUS_OPTIONS = ['Active', 'Prospect', 'Inactive'];
@@ -170,6 +171,23 @@ export default function Clients() {
       actions={
         <>
           <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> Export</Button>
+          <PhotoImportButton
+            kind="clients" title="Import clients from a photo" onImported={load}
+            fields={[
+              { key: 'name', label: 'Company' }, { key: 'phone', label: 'photo.f.phone' }, { key: 'email', label: 'photo.f.email' },
+              { key: 'address', label: 'photo.f.address', wide: true }, { key: 'notes', label: 'photo.f.notes', wide: true },
+            ]}
+            validate={(r) => (String(r.name || '').trim() ? '' : 'photo.missingName')}
+            toPayload={(r) => ({ name: r.name.trim(), phone: r.phone || '', email: r.email || '', address: r.address || '', notes: r.notes || '' })}
+            onSave={async (b) => {
+              const users = await api.users();
+              if (!users?.length) throw new Error('Add a recruiter first (Settings → Team).');
+              await api.createClient({
+                company_name: b.name, industry: 'Other', contact_name: b.name, contact_email: b.email || 'not-provided@example.com',
+                contact_phone: b.phone || '—', address: b.address || '—', owner_user_id: users[0].id, status: 'Prospect', notes: b.notes || null,
+              });
+            }}
+          />
           <Button onClick={openCreate}><Icon name="plus" size={15} /> New Client</Button>
         </>
       }

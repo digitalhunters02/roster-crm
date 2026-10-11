@@ -8,6 +8,7 @@ import {
 import Icon from '../components/Icon.jsx';
 import { shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
+import PhotoImportButton from '../components/PhotoImportButton.jsx';
 
 const SOURCE_TONE = { LinkedIn: 'blue', Referral: 'green', 'Job Board': 'amber', Sourced: 'brand' };
 const SOURCE_OPTIONS = ['LinkedIn', 'Referral', 'Job Board', 'Sourced'];
@@ -171,6 +172,23 @@ export default function Candidates() {
       actions={
         <>
           <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> Export</Button>
+          <PhotoImportButton
+            kind="clients" title="Import candidates from a photo" onImported={load}
+            fields={[
+              { key: 'name', label: 'photo.f.name' }, { key: 'phone', label: 'photo.f.phone' }, { key: 'email', label: 'photo.f.email' },
+              { key: 'notes', label: 'Title, employer or skills', wide: true },
+            ]}
+            validate={(r) => (String(r.name || '').trim() ? '' : 'photo.missingName')}
+            toPayload={(r) => ({ name: r.name.trim(), phone: r.phone || '', email: r.email || '', notes: r.notes || '' })}
+            onSave={async (b) => {
+              const users = await api.users();
+              if (!users?.length) throw new Error('Add a recruiter first (Settings → Team).');
+              await api.createCandidate({
+                name: b.name, email: b.email || 'not-provided@example.com', phone: b.phone || '—', current_title: '—', current_employer: '—',
+                skills: b.notes || '—', resume_summary: b.notes || null, source: 'Sourced', owner_user_id: users[0].id,
+              });
+            }}
+          />
           <Button onClick={openCreate}><Icon name="plus" size={15} /> New Candidate</Button>
         </>
       }

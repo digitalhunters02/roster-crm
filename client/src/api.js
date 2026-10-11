@@ -53,6 +53,20 @@ function del(path) {
 }
 
 export const api = {
+  // ---- Importar de foto (a IA lê a imagem; nada é guardado no servidor) ----
+  photoApi: {
+    status: () => get('/photo-import/status'),
+    setCredit: (body) => put('/photo-import/credit', body),
+    read: async (file, kind, lang) => {
+      const form = new FormData();
+      form.append('kind', kind); form.append('lang', lang); form.append('file', file, file.name || 'photo.jpg');
+      const res = await fetch(`${BASE}/photo-import`, { method: 'POST', headers: authHeaders(), body: form });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) handleUnauthorized();
+      if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { code: data.code, status: res.status });
+      return data;
+    },
+  },
   dashboard: () => get('/dashboard'),
   reports: () => get('/reports'),
 

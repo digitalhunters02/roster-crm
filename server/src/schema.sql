@@ -154,3 +154,40 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS accounts_email_lower_idx ON accounts (lower(email));
 CREATE INDEX IF NOT EXISTS accounts_reset_token_idx ON accounts (reset_token_hash);
+
+-- ---------- Planos e cobrança (Stripe da Impact Digital) ----------
+-- Uma assinatura por instalação (linha única, id = 1), como no Parcel.
+CREATE TABLE IF NOT EXISTS subscription (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  plan TEXT NOT NULL DEFAULT 'basico',
+  status TEXT NOT NULL DEFAULT 'active',
+  stripe_customer_id TEXT,
+  stripe_subscription_id TEXT,
+  billing_interval TEXT NOT NULL DEFAULT 'month',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT subscription_single_row CHECK (id = 1)
+);
+
+-- Teste grátis de 3 dias (conta temporária que usa os dados de exemplo) e vínculo conta -> recrutador.
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_demo_trial BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS demo_expires_at TIMESTAMPTZ;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+
+-- Automações que disparam de verdade: tipo do gatilho e da ação, e o histórico de execuções.
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS trigger_type TEXT;
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS action_type TEXT;
+ALTER TABLE automations ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS automation_runs (
+  id SERIAL PRIMARY KEY,
+  automation_id INTEGER NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+  related_type TEXT,
+  related_id INTEGER,
+  ran_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_automation_runs_ran ON automation_runs (automation_id, ran_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_runs_once ON automation_runs (automation_id, related_type, related_id) WHERE related_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS app_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);

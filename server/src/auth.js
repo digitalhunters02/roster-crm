@@ -4,7 +4,7 @@
 // owner / staff role model.
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { get, run } from './db.js';
+import { get, all, run } from './db.js';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -48,6 +48,9 @@ export function publicAccount(a) {
     email: a.email,
     role: a.role,
     mustChangePassword: !!a.must_change_password,
+    isDemoTrial: !!a.is_demo_trial,
+    demoExpiresAt: a.demo_expires_at || null,
+    userId: a.user_id || null,
     createdAt: a.created_at,
   };
 }
@@ -85,8 +88,37 @@ export async function requireAuth(req, res, next) {
   }
 }
 
+// Every real login is also a recruiter ("users" table) so it can own clients, jobs and candidates.
+// Links the account to the recruiter with the same email (e.g. sample data) or creates a new one.
+const RECRUITER_COLORS = ['#5B4EE0', '#2F6FE0', '#0E9488', '#FF6B57', '#C98A1D', '#D1477A', '#7A5AF8', '#16A34A'];
+const initialsOf = (name) => String(name || '?').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
+export async function ensureRecruiter(account) {
+  if (!account || account.is_demo_trial || account.user_id) return account?.user_id || null;
+  let u = await get(`SELECT id FROM users WHERE lower(email) = $1`, [normalizeEmail(account.email)]);
+  if (!u) {
+    const n = (await get(`SELECT COUNT(*)::int AS n FROM users`)).n;
+    u = (await run(
+      `INSERT INTO users (name, email, role, initials, color) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [account.name, normalizeEmail(account.email), account.role === 'owner' ? 'Owner' : 'Recruiter', initialsOf(account.name), RECRUITER_COLORS[n % RECRUITER_COLORS.length]]
+    )).rows[0];
+  }
+  await run(`UPDATE accounts SET user_id = $1 WHERE id = $2`, [u.id, account.id]);
+  account.user_id = u.id;
+  return u.id;
+}
+export async function backfillRecruiters() {
+  const rows = await all(`SELECT * FROM accounts WHERE user_id IS NULL AND is_demo_trial = FALSE`);
+  for (const a of rows) await ensureRecruiter(a);
+}
+
 export function requireOwner(req, res, next) {
   if (req.account?.role !== 'owner') return res.status(403).json({ error: 'Only the account owner can do this' });
+  next();
+}
+
+// A free-trial login works on the shared sample data only: no AI reads, no outgoing messages.
+export function blockDemo(req, res, next) {
+  if (req.account?.is_demo_trial) return res.status(403).json({ error: 'Not available in the free trial. Sign in with a real account to use this.', code: 'demo_blocked' });
   next();
 }
 

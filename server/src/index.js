@@ -5,11 +5,16 @@ import { fileURLToPath } from 'node:url';
 import pool, { get, all, run, initSchema } from './db.js';
 import crypto from 'node:crypto';
 import * as whatsapp from './whatsapp.js';
-import { requireAuth, requireOwner, bootstrapOwner } from './auth.js';
-import { publicAuthRoutes, accountRoutes } from './authRoutes.js';
+import { requireAuth, requireOwner, blockDemo, bootstrapOwner, backfillRecruiters } from './auth.js';
+import { publicAuthRoutes, accountRoutes, demoTrialRoute } from './authRoutes.js';
 import { mountAdminSummary } from './adminSummary.js';
+import { publicBillingRoutes, billingRoutes, billingStatus } from './billingRoutes.js';
+import { effectivePlan, getSubscription, requirePlan, enforceLimit, getAdminSummary } from './billing.js';
+import * as automationEngine from './automationEngine.js';
+import { startDemoTrialScheduler } from './demoTrial.js';
+import { rollSampleDates } from './sampleData.js';
+import { parseResumeText } from './resumeParse.js';
 import { createPhotoImportRouter, initPhotoImportSchema, startPhotoBilling } from './photoImportRouter.js';
-import { effectivePlan, getSubscription } from './photoPlan.js';
 import { sendNoticeEmail } from './mailer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -44,9 +49,11 @@ app.get('/api/health', ar(async (_req, res) => {
 }));
 
 publicAuthRoutes(app, ar);
+demoTrialRoute(app, ar);
+publicBillingRoutes(app, ar);
 
 // Machine-to-machine: Harbor reads this with X-Admin-Key (see adminSummary.js).
-mountAdminSummary(app, ar, get);
+mountAdminSummary(app, ar, get, getAdminSummary);
 
 // -------------------- WhatsApp webhook (public) --------------------
 // Meta calls these directly (webhook verification handshake, then message
@@ -77,6 +84,7 @@ app.post('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
 app.use('/api', requireAuth);
 
 // "Importar de foto" (AI reads a photo/print, the person reviews before saving) + extra use by credits.
+app.use('/api/photo-import', blockDemo);
 app.use('/api/photo-import', createPhotoImportRouter({
   pool, requireAuth, requireAdmin: requireOwner, effectivePlan, getSubscription,
   planLimits: { basico: 0, essencial: 100, completo: 500 },
@@ -84,6 +92,22 @@ app.use('/api/photo-import', createPhotoImportRouter({
   adminWhere: "role = 'owner'", isAdmin: (a) => a?.role === 'owner',
   appName: 'Roster', sendNotice: sendNoticeEmail,
 }));
+billingRoutes(app, ar);
+
+// ---------- plan gates and limits (see billing.js: PLAN_LIMITS / FEATURE_MIN_PLAN) ----------
+// Timesheets & invoices and the WhatsApp inbox start at the Essential plan; the Basic plan has limits on
+// users, candidates, open jobs and active automations. Without Stripe (or on Impact Digital's own demo) nothing is locked.
+app.use('/api/timesheets', requirePlan('essencial'));
+app.use(['/api/integrations/whatsapp/connect', '/api/integrations/whatsapp/conversations'], requirePlan('essencial'));
+app.post('/api/integrations/whatsapp/send', blockDemo, requirePlan('essencial'));
+const countOf = (sql) => async () => Number((await get(sql)).n) || 0;
+app.post('/api/accounts', enforceLimit('users', countOf(`SELECT COUNT(*) AS n FROM accounts WHERE is_demo_trial = FALSE`)));
+app.post('/api/candidates', enforceLimit('candidates', countOf(`SELECT COUNT(*) AS n FROM candidates`)));
+const openJobsLimit = enforceLimit('openJobs', countOf(`SELECT COUNT(*) AS n FROM jobs WHERE status = 'Open'`));
+app.post('/api/jobs', (req, res, next) => ((req.body?.status ?? 'Open') === 'Open' ? openJobsLimit(req, res, next) : next()));
+const automationsLimit = enforceLimit('automations', countOf(`SELECT COUNT(*) AS n FROM automations WHERE active = 1`));
+app.post('/api/automations', (req, res, next) => (req.body?.active === false ? next() : automationsLimit(req, res, next)));
+app.patch('/api/automations/:id/active', (req, res, next) => (req.body?.active ? automationsLimit(req, res, next) : next()));
 accountRoutes(app, ar);
 
 // -------------------- helpers --------------------
@@ -125,8 +149,8 @@ app.get('/api/clients', ar(async (req, res) => {
 }));
 
 app.post('/api/clients', ar(async (req, res) => {
-  const b = req.body || {};
-  const missing = missingField(b, ['company_name', 'industry', 'contact_name', 'contact_email', 'contact_phone', 'address', 'owner_user_id', 'status']);
+  const b = { ...(req.body || {}), industry: req.body?.industry || '', contact_name: req.body?.contact_name || '', contact_email: req.body?.contact_email || '', contact_phone: req.body?.contact_phone || '', address: req.body?.address || '', status: req.body?.status || 'Active', owner_user_id: req.body?.owner_user_id || req.account?.user_id || null };
+  const missing = missingField(b, ['company_name', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
@@ -143,8 +167,8 @@ app.post('/api/clients', ar(async (req, res) => {
 app.put('/api/clients/:id', ar(async (req, res) => {
   const existing = await clientRow(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
-  const b = req.body || {};
-  const missing = missingField(b, ['company_name', 'industry', 'contact_name', 'contact_email', 'contact_phone', 'address', 'owner_user_id', 'status']);
+  const b = { ...(req.body || {}), industry: req.body?.industry || '', contact_name: req.body?.contact_name || '', contact_email: req.body?.contact_email || '', contact_phone: req.body?.contact_phone || '', address: req.body?.address || '', status: req.body?.status || 'Active', owner_user_id: req.body?.owner_user_id || req.account?.user_id || null };
+  const missing = missingField(b, ['company_name', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
@@ -192,8 +216,8 @@ app.get('/api/jobs', ar(async (req, res) => {
 }));
 
 app.post('/api/jobs', ar(async (req, res) => {
-  const b = req.body || {};
-  const missing = missingField(b, ['client_id', 'title', 'employment_type', 'pay_range', 'location', 'status', 'owner_user_id', 'opened_date']);
+  const b = { ...(req.body || {}), employment_type: req.body?.employment_type || 'Contract', pay_range: req.body?.pay_range || '', location: req.body?.location || '', status: req.body?.status || 'Open', owner_user_id: req.body?.owner_user_id || req.account?.user_id || null, opened_date: req.body?.opened_date || new Date().toISOString().slice(0, 10) };
+  const missing = missingField(b, ['client_id', 'title', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('clients', b.client_id))) return res.status(400).json({ error: 'client_id does not reference a real client' });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
@@ -211,8 +235,8 @@ app.post('/api/jobs', ar(async (req, res) => {
 app.put('/api/jobs/:id', ar(async (req, res) => {
   const existing = await jobRow(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
-  const b = req.body || {};
-  const missing = missingField(b, ['client_id', 'title', 'employment_type', 'pay_range', 'location', 'status', 'owner_user_id', 'opened_date']);
+  const b = { ...(req.body || {}), employment_type: req.body?.employment_type || 'Contract', pay_range: req.body?.pay_range || '', location: req.body?.location || '', status: req.body?.status || 'Open', owner_user_id: req.body?.owner_user_id || req.account?.user_id || null, opened_date: req.body?.opened_date || new Date().toISOString().slice(0, 10) };
+  const missing = missingField(b, ['client_id', 'title', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('clients', b.client_id))) return res.status(400).json({ error: 'client_id does not reference a real client' });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
@@ -258,9 +282,25 @@ app.get('/api/candidates', ar(async (req, res) => {
   res.json(await all(`${CANDIDATE_SELECT} ORDER BY cd.created_at DESC`));
 }));
 
+// Resume text -> candidate fields (no AI, no cost). The recruiter reviews the result before saving.
+app.post('/api/candidates/parse-resume', ar(async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (text.length < 20) return res.status(400).json({ error: 'Paste the resume text (at least a few lines).', code: 'resume_too_short' });
+  res.json(parseResumeText(text));
+}));
+
+// A candidate only needs a name (hourly and field workers often have no title, employer or email).
+function candidateDefaults(b, account) {
+  return {
+    ...b,
+    email: b.email || '', phone: b.phone || '', current_title: b.current_title || '', current_employer: b.current_employer || '',
+    skills: b.skills || '', source: b.source || 'Direct', owner_user_id: b.owner_user_id || account?.user_id || null,
+  };
+}
+
 app.post('/api/candidates', ar(async (req, res) => {
-  const b = req.body || {};
-  const missing = missingField(b, ['name', 'email', 'phone', 'current_title', 'current_employer', 'skills', 'source', 'owner_user_id']);
+  const b = candidateDefaults(req.body || {}, req.account);
+  const missing = missingField(b, ['name', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
@@ -272,14 +312,17 @@ app.post('/api/candidates', ar(async (req, res) => {
     skills: b.skills, resume_summary: b.resume_summary || null, source: b.source, owner_user_id: b.owner_user_id,
     created_at: b.created_at || new Date().toISOString().slice(0, 10),
   });
+  if (b.source === 'Referral') {
+    await automationEngine.fire('candidate_referral', { relatedType: 'candidate', relatedId: info.rows[0].id, ownerUserId: b.owner_user_id, subject: `New referral candidate: ${b.name}` });
+  }
   res.status(201).json(await candidateRow(info.rows[0].id));
 }));
 
 app.put('/api/candidates/:id', ar(async (req, res) => {
   const existing = await candidateRow(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
-  const b = req.body || {};
-  const missing = missingField(b, ['name', 'email', 'phone', 'current_title', 'current_employer', 'skills', 'source', 'owner_user_id']);
+  const b = candidateDefaults(req.body || {}, req.account);
+  const missing = missingField(b, ['name', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
@@ -323,6 +366,11 @@ const SUBMISSION_SELECT = `
 async function submissionRow(id) {
   return get(`${SUBMISSION_SELECT} WHERE s.id = ?`, id);
 }
+async function fireSubmitted(id) {
+  const row = await submissionRow(id);
+  if (!row) return;
+  await automationEngine.fire('submission_submitted', { relatedType: 'submission', relatedId: row.id, ownerUserId: row.owner_user_id, subject: `${row.candidate_name} was submitted to ${row.client_name} for ${row.job_title}` });
+}
 const SUBMISSION_STAGES = ['Sourced', 'Screened', 'Submitted to Client', 'Client Interview', 'Offer', 'Placed', 'Rejected', 'Withdrawn'];
 
 app.get('/api/submissions', ar(async (req, res) => {
@@ -345,6 +393,7 @@ app.post('/api/submissions', ar(async (req, res) => {
     candidate_id: b.candidate_id, job_id: b.job_id, stage: b.stage, owner_user_id: b.owner_user_id,
     submitted_date: b.submitted_date, notes: b.notes || null,
   });
+  if (b.stage === 'Submitted to Client') await fireSubmitted(info.rows[0].id);
   res.status(201).json(await submissionRow(info.rows[0].id));
 }));
 
@@ -367,6 +416,7 @@ app.put('/api/submissions/:id', ar(async (req, res) => {
     id: req.params.id, candidate_id: b.candidate_id, job_id: b.job_id, stage: b.stage, owner_user_id: b.owner_user_id,
     submitted_date: b.submitted_date, notes: b.notes || null,
   });
+  if (b.stage === 'Submitted to Client' && existing.stage !== 'Submitted to Client') await fireSubmitted(req.params.id);
   res.json(await submissionRow(req.params.id));
 }));
 
@@ -376,6 +426,7 @@ app.patch('/api/submissions/:id/stage', ar(async (req, res) => {
   const { stage } = req.body || {};
   if (!SUBMISSION_STAGES.includes(stage)) return res.status(400).json({ error: 'invalid stage' });
   await run(`UPDATE submissions SET stage = ? WHERE id = ?`, stage, req.params.id);
+  if (stage === 'Submitted to Client' && existing.stage !== 'Submitted to Client') await fireSubmitted(req.params.id);
   res.json(await submissionRow(req.params.id));
 }));
 
@@ -443,6 +494,15 @@ app.put('/api/interviews/:id', ar(async (req, res) => {
     id: req.params.id, submission_id: b.submission_id, interviewer_name: b.interviewer_name, scheduled_at: b.scheduled_at,
     type: b.type, status: b.status, notes: b.notes || null,
   });
+  if (b.status === 'Completed' && existing.status !== 'Completed') {
+    const sub = await get(`SELECT owner_user_id FROM submissions WHERE id = ?`, b.submission_id);
+    const who = await interviewRow(req.params.id);
+    await automationEngine.fire('interview_completed', {
+      relatedType: 'interview', relatedId: Number(req.params.id), ownerUserId: sub?.owner_user_id,
+      subject: `Follow up with ${who.client_name} about ${who.candidate_name} (${who.job_title}) - interview finished`,
+      occurredAt: new Date(Date.now() + 3 * 86400000).toISOString(), // the reminder is due in 3 days
+    });
+  }
   res.json(await interviewRow(req.params.id));
 }));
 
@@ -596,30 +656,43 @@ app.get('/api/activities', ar(async (req, res) => {
 }));
 
 // -------------------- automations --------------------
+const AUTOMATION_SELECT = `
+  SELECT a.*, (SELECT COUNT(*) FROM automation_runs r WHERE r.automation_id = a.id AND r.ran_at > now() - interval '30 days') AS runs_30d_real
+  FROM automations a`;
+const shapeAutomation = (r) => ({ ...r, runs_30d: r.runs_30d_real, runnable: !!r.trigger_type });
+
+app.get('/api/automations/catalog', ar(async (req, res) => {
+  res.json(Object.entries(automationEngine.TRIGGERS).map(([id, t]) => ({ id, ...t })));
+}));
+
 app.get('/api/automations', ar(async (req, res) => {
-  res.json(await all(`SELECT * FROM automations ORDER BY name`));
+  res.json((await all(`${AUTOMATION_SELECT} ORDER BY a.name`)).map(shapeAutomation));
 }));
 
 app.post('/api/automations', ar(async (req, res) => {
   const b = req.body || {};
-  const missing = missingField(b, ['name', 'trigger_desc', 'action_desc']);
-  if (missing) return res.status(400).json({ error: `${missing} is required` });
-
+  const t = automationEngine.TRIGGERS[b.trigger_type];
+  if (!String(b.name || '').trim()) return res.status(400).json({ error: 'name is required' });
+  if (!t) return res.status(400).json({ error: 'Choose what starts this rule', code: 'invalid_trigger' });
   const info = await run(`
-    INSERT INTO automations (name, trigger_desc, action_desc, active, runs_30d)
-    VALUES (@name, @trigger_desc, @action_desc, @active, 0) RETURNING id
-  `, {
-    name: b.name, trigger_desc: b.trigger_desc, action_desc: b.action_desc, active: b.active === false ? 0 : 1,
-  });
-  res.status(201).json(await get(`SELECT * FROM automations WHERE id = ?`, info.rows[0].id));
+    INSERT INTO automations (name, trigger_desc, action_desc, active, runs_30d, trigger_type, action_type)
+    VALUES (@name, @trigger_desc, @action_desc, @active, 0, @trigger_type, 'notify') RETURNING id
+  `, { name: b.name.trim(), trigger_desc: t.desc, action_desc: t.action, active: b.active === false ? 0 : 1, trigger_type: b.trigger_type });
+  res.status(201).json(shapeAutomation(await get(`${AUTOMATION_SELECT} WHERE a.id = ?`, info.rows[0].id)));
 }));
 
 app.patch('/api/automations/:id/active', ar(async (req, res) => {
   const existing = await get(`SELECT * FROM automations WHERE id = ?`, req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
   const { active } = req.body || {};
+  if (active && !existing.trigger_type) return res.status(400).json({ error: 'This old rule has no trigger and cannot run. Delete it and create it again.', code: 'rule_not_runnable' });
   await run(`UPDATE automations SET active = ? WHERE id = ?`, active ? 1 : 0, req.params.id);
-  res.json(await get(`SELECT * FROM automations WHERE id = ?`, req.params.id));
+  res.json(shapeAutomation(await get(`${AUTOMATION_SELECT} WHERE a.id = ?`, req.params.id)));
+}));
+
+// Run the daily checks now (job open 30+ days, overdue timesheets) instead of waiting for the hourly pass.
+app.post('/api/automations/run-now', ar(async (req, res) => {
+  res.json({ fired: await automationEngine.runScheduled() });
 }));
 
 app.delete('/api/automations/:id', ar(async (req, res) => {
@@ -683,20 +756,25 @@ app.get('/api/dashboard', ar(async (req, res) => {
 
   // scheduled_at is stored as text (e.g. '2026-07-22T10:00'); SQLite's date()
   // has no Postgres equivalent, so compare on the ISO date prefix instead.
+  const today = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const monday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - ((today.getUTCDay() + 6) % 7)));
+  const weekStart = iso(monday), weekEnd = iso(new Date(monday.getTime() + 6 * 86400000));
+  const recentFrom = iso(new Date(today.getTime() - 30 * 86400000)), todayIso = iso(today);
   const interviewsThisWeek = (await get(`
-    SELECT COUNT(*) AS n FROM interviews WHERE substr(scheduled_at, 1, 10) BETWEEN '2026-09-14' AND '2026-09-20'
-  `)).n;
+    SELECT COUNT(*) AS n FROM interviews WHERE substr(scheduled_at, 1, 10) BETWEEN ? AND ?
+  `, weekStart, weekEnd)).n;
 
   const placementsRecent = (await get(`
-    SELECT COUNT(*) AS n FROM placements WHERE start_date BETWEEN '2026-08-01' AND '2026-09-15'
-  `)).n;
+    SELECT COUNT(*) AS n FROM placements WHERE start_date BETWEEN ? AND ?
+  `, recentFrom, todayIso)).n;
 
   const feesFromNewPlacements = (await get(`
-    SELECT COALESCE(SUM(placement_fee), 0) AS v FROM placements WHERE start_date BETWEEN '2026-08-01' AND '2026-09-15'
-  `)).v;
+    SELECT COALESCE(SUM(placement_fee), 0) AS v FROM placements WHERE start_date BETWEEN ? AND ?
+  `, recentFrom, todayIso)).v;
   const paidTimesheetRevenue = (await get(`
-    SELECT COALESCE(SUM(amount), 0) AS v FROM timesheets_invoices WHERE status = 'Paid' AND period_end BETWEEN '2026-08-01' AND '2026-09-15'
-  `)).v;
+    SELECT COALESCE(SUM(amount), 0) AS v FROM timesheets_invoices WHERE status = 'Paid' AND period_end BETWEEN ? AND ?
+  `, recentFrom, todayIso)).v;
   const revenueRecent = feesFromNewPlacements + paidTimesheetRevenue;
 
   const submissionsByStage = await all(`
@@ -728,15 +806,16 @@ app.get('/api/dashboard', ar(async (req, res) => {
   // replaces SQLite's julianday() arithmetic.
   const openJobsAging = await all(`
     SELECT j.id, j.title, j.opened_date, c.company_name AS client_name,
-      (DATE '2026-09-15' - j.opened_date::date) AS days_open
+      (?::date - j.opened_date::date) AS days_open
     FROM jobs j JOIN clients c ON c.id = j.client_id
     WHERE j.status = 'Open'
     ORDER BY days_open DESC
     LIMIT 5
-  `);
+  `, todayIso);
 
   res.json({
     kpis: { openJobs, activePipelineCandidates, interviewsThisWeek, placementsRecent, revenueRecent },
+    ranges: { weekStart, weekEnd, recentFrom, today: todayIso },
     submissionsByStage,
     upcomingInterviews,
     recentActivity,
@@ -810,11 +889,17 @@ app.use((err, _req, res, next) => {
 initSchema()
   .then(() => initPhotoImportSchema(pool))
   .then(() => bootstrapOwner())
+  .then(() => backfillRecruiters())
+  .then(() => automationEngine.migrateAutomations())
+  .then(() => rollSampleDates())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Roster API listening on http://localhost:${PORT}`);
     });
     startPhotoBilling({ pool, getSubscription });
+    startDemoTrialScheduler();
+    automationEngine.startAutomationScheduler();
+    setInterval(() => rollSampleDates().catch(() => {}), 6 * 60 * 60 * 1000).unref();
   })
   .catch((err) => {
     console.error('Failed to initialize database schema:', err);

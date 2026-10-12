@@ -19,6 +19,9 @@ import { sendNoticeEmail, sendEmail, isMailConfigured } from './mailer.js';
 import { PROFILE_FIELDS, profileLimit, readProfile, isHttpUrl } from './profile.js';
 import { mountPortalPublic, mountPortalStaff, buildInvoice, invoiceNumber } from './portal.js';
 import { mountMessaging, mountSmsWebhook } from './messaging.js';
+import { mountSignatures, startSignaturePoller } from './signatures.js';
+import { mountTools } from './tools.js';
+import { mountPublicApi, mountIntegrationsAdmin, emit as emitWebhook } from './integrations.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
@@ -58,6 +61,8 @@ publicBillingRoutes(app, ar);
 // Client portal (private link, no login) and the SMS reply webhook Twilio calls. Both guard themselves (token / signature).
 mountPortalPublic(app, ar);
 mountSmsWebhook(app, ar);
+// Public API with API keys (Complete plan): the key is the login.
+mountPublicApi(app, ar);
 
 // Machine-to-machine: Harbor reads this with X-Admin-Key (see adminSummary.js).
 mountAdminSummary(app, ar, get, getAdminSummary);
@@ -156,6 +161,14 @@ async function countWhere(table, column, id) {
   return (await get(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`, id)).n;
 }
 
+// Optional office on clients, jobs and candidates (Complete plan creates the offices). Absent = keep what is there.
+async function officeFrom(body, current) {
+  if (body?.office_id === undefined) return { value: current ?? null };
+  if (body.office_id === null || body.office_id === '') return { value: null };
+  if (!(await rowExists('offices', body.office_id))) return { error: 'office_id does not reference a real office' };
+  return { value: Number(body.office_id) };
+}
+
 // -------------------- users (read-only; Team card on Settings) --------------------
 app.get('/api/users', ar(async (req, res) => {
   res.json(await all(`SELECT * FROM users ORDER BY name`));
@@ -183,11 +196,13 @@ app.post('/api/clients', ar(async (req, res) => {
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, null);
+  if (office.error) return res.status(400).json({ error: office.error });
   const info = await run(`
-    INSERT INTO clients (company_name, industry, contact_name, contact_email, contact_phone, address, owner_user_id, status, notes)
-    VALUES (@company_name, @industry, @contact_name, @contact_email, @contact_phone, @address, @owner_user_id, @status, @notes) RETURNING id
+    INSERT INTO clients (company_name, industry, contact_name, contact_email, contact_phone, address, owner_user_id, status, notes, office_id)
+    VALUES (@company_name, @industry, @contact_name, @contact_email, @contact_phone, @address, @owner_user_id, @status, @notes, @office_id) RETURNING id
   `, {
-    company_name: b.company_name, industry: b.industry, contact_name: b.contact_name, contact_email: b.contact_email,
+    office_id: office.value, company_name: b.company_name, industry: b.industry, contact_name: b.contact_name, contact_email: b.contact_email,
     contact_phone: b.contact_phone, address: b.address, owner_user_id: b.owner_user_id, status: b.status, notes: b.notes || null,
   });
   res.status(201).json(await clientRow(info.rows[0].id));
@@ -201,12 +216,14 @@ app.put('/api/clients/:id', ar(async (req, res) => {
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, existing.office_id);
+  if (office.error) return res.status(400).json({ error: office.error });
   await run(`
     UPDATE clients SET company_name = @company_name, industry = @industry, contact_name = @contact_name, contact_email = @contact_email,
-      contact_phone = @contact_phone, address = @address, owner_user_id = @owner_user_id, status = @status, notes = @notes
+      contact_phone = @contact_phone, address = @address, owner_user_id = @owner_user_id, status = @status, notes = @notes, office_id = @office_id
     WHERE id = @id
   `, {
-    id: req.params.id, company_name: b.company_name, industry: b.industry, contact_name: b.contact_name, contact_email: b.contact_email,
+    office_id: office.value, id: req.params.id, company_name: b.company_name, industry: b.industry, contact_name: b.contact_name, contact_email: b.contact_email,
     contact_phone: b.contact_phone, address: b.address, owner_user_id: b.owner_user_id, status: b.status, notes: b.notes || null,
   });
   res.json(await clientRow(req.params.id));
@@ -251,11 +268,13 @@ app.post('/api/jobs', ar(async (req, res) => {
   if (!(await rowExists('clients', b.client_id))) return res.status(400).json({ error: 'client_id does not reference a real client' });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, null);
+  if (office.error) return res.status(400).json({ error: office.error });
   const info = await run(`
-    INSERT INTO jobs (client_id, title, employment_type, pay_range, location, status, owner_user_id, opened_date, notes)
-    VALUES (@client_id, @title, @employment_type, @pay_range, @location, @status, @owner_user_id, @opened_date, @notes) RETURNING id
+    INSERT INTO jobs (client_id, title, employment_type, pay_range, location, status, owner_user_id, opened_date, notes, office_id)
+    VALUES (@client_id, @title, @employment_type, @pay_range, @location, @status, @owner_user_id, @opened_date, @notes, @office_id) RETURNING id
   `, {
-    client_id: b.client_id, title: b.title, employment_type: b.employment_type, pay_range: b.pay_range, location: b.location,
+    office_id: office.value, client_id: b.client_id, title: b.title, employment_type: b.employment_type, pay_range: b.pay_range, location: b.location,
     status: b.status, owner_user_id: b.owner_user_id, opened_date: b.opened_date, notes: b.notes || null,
   });
   res.status(201).json(await jobRow(info.rows[0].id));
@@ -270,12 +289,14 @@ app.put('/api/jobs/:id', ar(async (req, res) => {
   if (!(await rowExists('clients', b.client_id))) return res.status(400).json({ error: 'client_id does not reference a real client' });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, existing.office_id);
+  if (office.error) return res.status(400).json({ error: office.error });
   await run(`
     UPDATE jobs SET client_id = @client_id, title = @title, employment_type = @employment_type, pay_range = @pay_range,
-      location = @location, status = @status, owner_user_id = @owner_user_id, opened_date = @opened_date, notes = @notes
+      location = @location, status = @status, owner_user_id = @owner_user_id, opened_date = @opened_date, notes = @notes, office_id = @office_id
     WHERE id = @id
   `, {
-    id: req.params.id, client_id: b.client_id, title: b.title, employment_type: b.employment_type, pay_range: b.pay_range,
+    office_id: office.value, id: req.params.id, client_id: b.client_id, title: b.title, employment_type: b.employment_type, pay_range: b.pay_range,
     location: b.location, status: b.status, owner_user_id: b.owner_user_id, opened_date: b.opened_date, notes: b.notes || null,
   });
   res.json(await jobRow(req.params.id));
@@ -333,18 +354,22 @@ app.post('/api/candidates', ar(async (req, res) => {
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, null);
+  if (office.error) return res.status(400).json({ error: office.error });
   const info = await run(`
-    INSERT INTO candidates (name, email, phone, current_title, current_employer, skills, resume_summary, source, owner_user_id, created_at)
-    VALUES (@name, @email, @phone, @current_title, @current_employer, @skills, @resume_summary, @source, @owner_user_id, @created_at) RETURNING id
+    INSERT INTO candidates (name, email, phone, current_title, current_employer, skills, resume_summary, source, owner_user_id, created_at, office_id)
+    VALUES (@name, @email, @phone, @current_title, @current_employer, @skills, @resume_summary, @source, @owner_user_id, @created_at, @office_id) RETURNING id
   `, {
-    name: b.name, email: b.email, phone: b.phone, current_title: b.current_title, current_employer: b.current_employer,
+    office_id: office.value, name: b.name, email: b.email, phone: b.phone, current_title: b.current_title, current_employer: b.current_employer,
     skills: b.skills, resume_summary: b.resume_summary || null, source: b.source, owner_user_id: b.owner_user_id,
     created_at: b.created_at || new Date().toISOString().slice(0, 10),
   });
   if (b.source === 'Referral') {
     await automationEngine.fire('candidate_referral', { relatedType: 'candidate', relatedId: info.rows[0].id, ownerUserId: b.owner_user_id, subject: `New referral candidate: ${b.name}` });
   }
-  res.status(201).json(await candidateRow(info.rows[0].id));
+  const created = await candidateRow(info.rows[0].id);
+  emitWebhook('candidate.created', created);
+  res.status(201).json(created);
 }));
 
 app.put('/api/candidates/:id', ar(async (req, res) => {
@@ -355,12 +380,14 @@ app.put('/api/candidates/:id', ar(async (req, res) => {
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, existing.office_id);
+  if (office.error) return res.status(400).json({ error: office.error });
   await run(`
     UPDATE candidates SET name = @name, email = @email, phone = @phone, current_title = @current_title, current_employer = @current_employer,
-      skills = @skills, resume_summary = @resume_summary, source = @source, owner_user_id = @owner_user_id
+      skills = @skills, resume_summary = @resume_summary, source = @source, owner_user_id = @owner_user_id, office_id = @office_id
     WHERE id = @id
   `, {
-    id: req.params.id, name: b.name, email: b.email, phone: b.phone, current_title: b.current_title, current_employer: b.current_employer,
+    office_id: office.value, id: req.params.id, name: b.name, email: b.email, phone: b.phone, current_title: b.current_title, current_employer: b.current_employer,
     skills: b.skills, resume_summary: b.resume_summary || null, source: b.source, owner_user_id: b.owner_user_id,
   });
   res.json(await candidateRow(req.params.id));
@@ -423,7 +450,9 @@ app.post('/api/submissions', ar(async (req, res) => {
     submitted_date: b.submitted_date, notes: b.notes || null,
   });
   if (b.stage === 'Submitted to Client') await fireSubmitted(info.rows[0].id);
-  res.status(201).json(await submissionRow(info.rows[0].id));
+  const made = await submissionRow(info.rows[0].id);
+  emitWebhook('submission.stage_changed', { ...made, previous_stage: null });
+  res.status(201).json(made);
 }));
 
 app.put('/api/submissions/:id', ar(async (req, res) => {
@@ -446,7 +475,9 @@ app.put('/api/submissions/:id', ar(async (req, res) => {
     submitted_date: b.submitted_date, notes: b.notes || null,
   });
   if (b.stage === 'Submitted to Client' && existing.stage !== 'Submitted to Client') await fireSubmitted(req.params.id);
-  res.json(await submissionRow(req.params.id));
+  const saved = await submissionRow(req.params.id);
+  if (existing.stage !== b.stage) emitWebhook('submission.stage_changed', { ...saved, previous_stage: existing.stage });
+  res.json(saved);
 }));
 
 app.patch('/api/submissions/:id/stage', ar(async (req, res) => {
@@ -456,7 +487,9 @@ app.patch('/api/submissions/:id/stage', ar(async (req, res) => {
   if (!SUBMISSION_STAGES.includes(stage)) return res.status(400).json({ error: 'invalid stage' });
   await run(`UPDATE submissions SET stage = ? WHERE id = ?`, stage, req.params.id);
   if (stage === 'Submitted to Client' && existing.stage !== 'Submitted to Client') await fireSubmitted(req.params.id);
-  res.json(await submissionRow(req.params.id));
+  const moved = await submissionRow(req.params.id);
+  if (existing.stage !== stage) emitWebhook('submission.stage_changed', { ...moved, previous_stage: existing.stage });
+  res.json(moved);
 }));
 
 app.delete('/api/submissions/:id', ar(async (req, res) => {
@@ -576,7 +609,9 @@ app.post('/api/placements', ar(async (req, res) => {
     start_date: b.start_date, end_date: b.end_date || null, pay_rate: Number(b.pay_rate) || 0,
     bill_rate: Number(b.bill_rate) || 0, placement_fee: Number(b.placement_fee) || 0, status: b.status,
   });
-  res.status(201).json(await placementRow(info.rows[0].id));
+  const placed = await placementRow(info.rows[0].id);
+  emitWebhook('placement.created', placed);
+  res.status(201).json(placed);
 }));
 
 app.put('/api/placements/:id', ar(async (req, res) => {
@@ -672,6 +707,7 @@ app.put('/api/timesheets/:id', ar(async (req, res) => {
     id: req.params.id, placement_id: b.placement_id, period_start: b.period_start, period_end: b.period_end,
     hours: Number(b.hours) || 0, amount, status: b.status,
   });
+  if (existing.status !== b.status) emitWebhook('timesheet.status_changed', { id: Number(req.params.id), previous_status: existing.status, status: b.status });
   // The client approved a different number: the approval no longer stands.
   if (Number(existing.hours) !== (Number(b.hours) || 0) || Number(existing.amount) !== amount) {
     await run(`UPDATE timesheets_invoices SET client_approved_at = NULL, client_approved_by = NULL WHERE id = ?`, req.params.id);
@@ -712,7 +748,9 @@ app.post('/api/timesheets/:id/send-invoice', blockDemo, ar(async (req, res) => {
   ].join('\n');
   await sendEmail({ to: client.contact_email, subject: `Invoice ${num} from ${a.name || 'your staffing partner'}`, text, replyTo: a.email || req.account?.email, fromName: a.name });
   await run(`UPDATE timesheets_invoices SET invoice_sent_at = now(), status = CASE WHEN status = 'Draft' THEN 'Sent' ELSE status END WHERE id = ?`, t.id);
-  res.json(await timesheetRow(t.id));
+  const after = await timesheetRow(t.id);
+  if (after.status !== t.status) emitWebhook('timesheet.status_changed', { id: t.id, previous_status: t.status, status: after.status });
+  res.json(after);
 }));
 
 app.delete('/api/timesheets/:id', ar(async (req, res) => {
@@ -725,6 +763,9 @@ app.delete('/api/timesheets/:id', ar(async (req, res) => {
 // -------------------- activities (dashboard feed) --------------------
 mountPortalStaff(app, ar, { requirePlan, blockDemo });
 mountMessaging(app, ar, { requireOwner, blockDemo });
+mountSignatures(app, ar, { requirePlan, blockDemo });
+mountTools(app, ar, { requirePlan, blockDemo, requireOwner });
+mountIntegrationsAdmin(app, ar, { requirePlan, requireOwner, blockDemo });
 
 app.get('/api/activities', ar(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 200);
@@ -939,7 +980,18 @@ app.get('/api/reports', ar(async (req, res) => {
   const totalPlacementFees = (await get(`SELECT COALESCE(SUM(placement_fee), 0) AS v FROM placements`)).v;
   const totalInvoiced = (await get(`SELECT COALESCE(SUM(amount), 0) AS v FROM timesheets_invoices`)).v;
 
+  // Results per office (the office of a placement is the office of its job).
+  const officeNames = new Map((await all(`SELECT id, name FROM offices`)).map((o) => [o.id, o.name]));
+  const feeRows = await all(`SELECT j.office_id, COUNT(*) AS placement_count, COALESCE(SUM(p.placement_fee), 0) AS total_fees FROM placements p JOIN jobs j ON j.id = p.job_id GROUP BY j.office_id`);
+  const billedRows = await all(`SELECT j.office_id, COALESCE(SUM(t.amount), 0) AS billed FROM timesheets_invoices t JOIN placements p ON p.id = t.placement_id JOIN jobs j ON j.id = p.job_id GROUP BY j.office_id`);
+  const officeKeys = new Set([...feeRows, ...billedRows].map((r) => r.office_id ?? 0));
+  const byOffice = [...officeKeys].map((k) => {
+    const f = feeRows.find((r) => (r.office_id ?? 0) === k), bl = billedRows.find((r) => (r.office_id ?? 0) === k);
+    return { office_id: k || null, office_name: k ? (officeNames.get(k) || '') : '', placement_count: f?.placement_count || 0, total_fees: Number(f?.total_fees) || 0, billed: Number(bl?.billed) || 0 };
+  }).sort((x, y) => y.billed - x.billed);
+
   res.json({
+    byOffice,
     funnelByStage,
     placementRate,
     placed,
@@ -982,6 +1034,7 @@ initSchema()
     startPhotoBilling({ pool, getSubscription });
     startDemoTrialScheduler();
     automationEngine.startAutomationScheduler();
+    startSignaturePoller();
     setInterval(() => rollSampleDates().catch(() => {}), 6 * 60 * 60 * 1000).unref();
   })
   .catch((err) => {

@@ -247,3 +247,84 @@ CREATE TABLE IF NOT EXISTS sms_connection (
   connected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT sms_connection_single_row CHECK (id = 1)
 );
+
+-- ---------- Etapa 3 (plano Completo) ----------
+-- Escritórios: rótulo opcional em clientes, vagas, candidatos e recrutadores.
+CREATE TABLE IF NOT EXISTS offices (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  city TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS office_id INTEGER REFERENCES offices(id) ON DELETE SET NULL;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS office_id INTEGER REFERENCES offices(id) ON DELETE SET NULL;
+ALTER TABLE candidates ADD COLUMN IF NOT EXISTS office_id INTEGER REFERENCES offices(id) ON DELETE SET NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS office_id INTEGER REFERENCES offices(id) ON DELETE SET NULL;
+
+-- Lista de documentos do candidato com vencimento: só um lembrete para a agência (o Roster não confere nem valida documentos).
+CREATE TABLE IF NOT EXISTS candidate_documents (
+  id SERIAL PRIMARY KEY,
+  candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+  doc_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'Requested',
+  expires_on TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_candidate_documents_candidate ON candidate_documents (candidate_id);
+
+-- Uso mensal da IA (um contador por mês e instalação).
+CREATE TABLE IF NOT EXISTS ai_usage (
+  month TEXT PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 0
+);
+
+-- Assinatura eletrônica pelo Documenso da própria agência (PDF enviado por ela).
+CREATE TABLE IF NOT EXISTS signature_requests (
+  id SERIAL PRIMARY KEY,
+  kind TEXT NOT NULL,
+  related_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  signer_name TEXT NOT NULL,
+  signer_email TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'sent',
+  error TEXT,
+  signing_url TEXT,
+  documenso_id TEXT,
+  signed_pdf BYTEA,
+  account_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  signed_at TIMESTAMPTZ,
+  last_checked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_signature_requests_related ON signature_requests (kind, related_id);
+
+-- API pública (chaves) e webhooks de saída.
+CREATE TABLE IF NOT EXISTS api_keys (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  key_prefix TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS webhooks (
+  id SERIAL PRIMARY KEY,
+  url TEXT NOT NULL,
+  events TEXT NOT NULL DEFAULT '*',
+  secret_enc TEXT NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id SERIAL PRIMARY KEY,
+  webhook_id INTEGER NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  event TEXT NOT NULL,
+  status_code INTEGER,
+  ok BOOLEAN NOT NULL DEFAULT FALSE,
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_hook ON webhook_deliveries (webhook_id, id DESC);

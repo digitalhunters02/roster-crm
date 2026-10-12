@@ -6,6 +6,7 @@
 //   Daily triggers  -> runScheduled() looks for records that crossed the line; runs hourly.
 import { get, all, run } from './db.js';
 import { sendNoticeEmail } from './mailer.js';
+import { effectivePlan, PLAN_RANK } from './billing.js';
 
 // The catalog the screen offers when creating a rule (label/description are translated on the client).
 export const TRIGGERS = {
@@ -13,6 +14,7 @@ export const TRIGGERS = {
   job_open_30d: { desc: 'A job has been open for 30 days or more', action: 'Notify the job owner' },
   interview_completed: { desc: 'Interview status is set to Completed', action: 'Remind the submission owner to follow up (3 days later)' },
   timesheet_overdue: { desc: 'Timesheet is Sent and 15 days have passed since the period ended', action: 'Mark it Overdue and notify the placement owner' },
+  document_expiring: { desc: 'A candidate document expires in 30 days or less (or already expired)', action: 'Notify the candidate owner' },
   candidate_referral: { desc: 'A candidate is added with source Referral', action: 'Notify the candidate owner' },
 };
 export const ACTIONS = ['notify'];
@@ -97,6 +99,23 @@ export async function runScheduled() {
         if (await perform(rule, { relatedType: 'timesheet', relatedId: t.id, ownerUserId: t.owner_user_id, subject: `Timesheet for ${t.candidate_name} (period ended ${t.period_end}) is overdue` })) {
           await run(`UPDATE timesheets_invoices SET status = 'Overdue' WHERE id = $1 AND status = 'Sent'`, [t.id]);
           total += 1;
+        }
+      }
+    }
+    // Candidate documents about to expire (Complete plan). The rule is created once, switched on, so the reminders just work.
+    if (PLAN_RANK[await effectivePlan()] >= PLAN_RANK.completo) {
+      if (!(await get(`SELECT 1 FROM automations WHERE trigger_type = 'document_expiring'`))) {
+        const t = TRIGGERS.document_expiring;
+        await run(`INSERT INTO automations (name, trigger_desc, action_desc, active, runs_30d, trigger_type, action_type) VALUES ('Document expiring', $1, $2, 1, 0, 'document_expiring', 'notify')`, [t.desc, t.action]);
+      }
+      const limit = isoDay(new Date(Date.now() + 30 * 86400000));
+      for (const rule of await rulesFor('document_expiring')) {
+        const docs = await all(
+          `SELECT d.id, d.doc_type, d.expires_on, cd.name, cd.owner_user_id FROM candidate_documents d JOIN candidates cd ON cd.id = d.candidate_id
+           WHERE d.expires_on IS NOT NULL AND d.expires_on <= $1`, [limit]);
+        for (const d of docs) {
+          const when = d.expires_on < today ? `expired on ${d.expires_on}` : `expires on ${d.expires_on}`;
+          if (await perform(rule, { relatedType: 'document', relatedId: d.id, ownerUserId: d.owner_user_id, subject: `${d.name}: ${d.doc_type} ${when}` })) total += 1;
         }
       }
     }

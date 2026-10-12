@@ -129,7 +129,7 @@ export const PLAN_LIMITS = {
   completo: { users: 25, candidates: Infinity, openJobs: Infinity, automations: Infinity },
 };
 // Lowest plan that unlocks each locked area (the Basic plan has no payroll-side tools or WhatsApp).
-export const FEATURE_MIN_PLAN = { timesheets: 'essencial', whatsapp: 'essencial', portal: 'essencial', messaging: 'essencial', ai: 'completo' };
+export const FEATURE_MIN_PLAN = { timesheets: 'essencial', whatsapp: 'essencial', portal: 'essencial', messaging: 'essencial', ai: 'completo', signatures: 'completo', documents: 'completo', payroll: 'completo', api: 'completo', offices: 'completo' };
 export const featuresFor = (plan) => Object.fromEntries(Object.entries(FEATURE_MIN_PLAN).map(([f, min]) => [f, PLAN_RANK[plan] >= PLAN_RANK[min]]));
 
 // The plan Impact Digital's provisioning robot sets (LICENSED_PLAN) on a

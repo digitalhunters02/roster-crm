@@ -191,3 +191,59 @@ CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+
+-- ---------- Etapa 2: portal do cliente, fatura, mensagens ----------
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS portal_token TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS portal_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_portal_token ON clients (portal_token) WHERE portal_token IS NOT NULL;
+
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS client_approved_at TIMESTAMPTZ;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS client_approved_by TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS client_dispute_note TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS invoice_sent_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS portal_feedback (
+  id SERIAL PRIMARY KEY,
+  submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  decision TEXT NOT NULL,
+  note TEXT,
+  by_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE candidates ADD COLUMN IF NOT EXISTS sms_opt_out BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- One log of everything sent to / received from candidates by SMS and e-mail (WhatsApp keeps its own table).
+CREATE TABLE IF NOT EXISTS messages (
+  id SERIAL PRIMARY KEY,
+  channel TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  candidate_id INTEGER REFERENCES candidates(id) ON DELETE SET NULL,
+  contact TEXT,
+  subject TEXT,
+  body TEXT NOT NULL,
+  status TEXT,
+  external_id TEXT,
+  account_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_messages_candidate ON messages (candidate_id, created_at);
+
+CREATE TABLE IF NOT EXISTS message_templates (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  subject TEXT,
+  body TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- The agency's own Twilio account (SMS). The auth token is stored encrypted and never sent back to the browser.
+CREATE TABLE IF NOT EXISTS sms_connection (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  account_sid TEXT NOT NULL,
+  auth_token_enc TEXT NOT NULL,
+  from_number TEXT NOT NULL,
+  connected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT sms_connection_single_row CHECK (id = 1)
+);

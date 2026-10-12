@@ -15,7 +15,10 @@ import { startDemoTrialScheduler } from './demoTrial.js';
 import { rollSampleDates } from './sampleData.js';
 import { parseResumeText } from './resumeParse.js';
 import { createPhotoImportRouter, initPhotoImportSchema, startPhotoBilling } from './photoImportRouter.js';
-import { sendNoticeEmail } from './mailer.js';
+import { sendNoticeEmail, sendEmail, isMailConfigured } from './mailer.js';
+import { PROFILE_FIELDS, profileLimit, readProfile, isHttpUrl } from './profile.js';
+import { mountPortalPublic, mountPortalStaff, buildInvoice, invoiceNumber } from './portal.js';
+import { mountMessaging, mountSmsWebhook } from './messaging.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
@@ -51,6 +54,10 @@ app.get('/api/health', ar(async (_req, res) => {
 publicAuthRoutes(app, ar);
 demoTrialRoute(app, ar);
 publicBillingRoutes(app, ar);
+
+// Client portal (private link, no login) and the SMS reply webhook Twilio calls. Both guard themselves (token / signature).
+mountPortalPublic(app, ar);
+mountSmsWebhook(app, ar);
 
 // Machine-to-machine: Harbor reads this with X-Admin-Key (see adminSummary.js).
 mountAdminSummary(app, ar, get, getAdminSummary);
@@ -100,6 +107,8 @@ billingRoutes(app, ar);
 app.use('/api/timesheets', requirePlan('essencial'));
 app.use(['/api/integrations/whatsapp/connect', '/api/integrations/whatsapp/conversations'], requirePlan('essencial'));
 app.post('/api/integrations/whatsapp/send', blockDemo, requirePlan('essencial'));
+app.use(['/api/message-templates', '/api/integrations/sms/connect', '/api/integrations/sms/disconnect'], requirePlan('essencial'));
+app.use('/api/candidates/:id/messages', requirePlan('essencial'));
 const countOf = (sql) => async () => Number((await get(sql)).n) || 0;
 app.post('/api/accounts', enforceLimit('users', countOf(`SELECT COUNT(*) AS n FROM accounts WHERE is_demo_trial = FALSE`)));
 app.post('/api/candidates', enforceLimit('candidates', countOf(`SELECT COUNT(*) AS n FROM candidates`)));
@@ -111,18 +120,15 @@ app.patch('/api/automations/:id/active', (req, res, next) => (req.body?.active ?
 accountRoutes(app, ar);
 
 // -------------------- agency profile (name, contact, logo): stored on the server, one per installation --------------------
-const PROFILE_FIELDS = ['name', 'address', 'phone', 'email', 'description'];
-async function readProfile() {
-  const row = await get(`SELECT value FROM app_meta WHERE key = 'company_profile'`);
-  let p = {}; try { p = row ? JSON.parse(row.value) : {}; } catch { /* corrupted: start over */ }
-  return { name: '', address: '', phone: '', email: '', description: '', logo: '', ...p };
-}
 app.get('/api/company-profile', ar(async (_req, res) => res.json(await readProfile())));
 app.put('/api/company-profile', requireOwner, ar(async (req, res) => {
   const b = req.body || {};
   const cur = await readProfile();
   const next = { ...cur };
-  for (const f of PROFILE_FIELDS) if (typeof b[f] === 'string') next[f] = b[f].trim().slice(0, f === 'description' ? 600 : 200);
+  for (const f of PROFILE_FIELDS) if (typeof b[f] === 'string') next[f] = b[f].trim().slice(0, profileLimit(f));
+  if (next.payment_url && !isHttpUrl(next.payment_url)) {
+    return res.status(400).json({ error: 'The payment link must start with https://', code: 'invalid_payment_url' });
+  }
   if (typeof b.logo === 'string') {
     if (b.logo !== '' && !(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.logo) && b.logo.length <= 400_000)) {
       return res.status(400).json({ error: 'The logo must be a PNG, JPEG or WebP image under 300 KB.', code: 'invalid_logo' });
@@ -608,7 +614,10 @@ app.delete('/api/placements/:id', ar(async (req, res) => {
 
 // -------------------- timesheets & invoicing --------------------
 const TIMESHEET_SELECT = `
-  SELECT t.*, cd.name AS candidate_name, c.company_name AS client_name, j.title AS job_title
+  SELECT t.*, cd.name AS candidate_name, c.company_name AS client_name, j.title AS job_title,
+    p.pay_rate, p.bill_rate, c.portal_enabled AS client_portal_enabled,
+    ROUND((t.hours * p.pay_rate)::numeric, 2)::float8 AS cost,
+    ROUND((t.amount - t.hours * p.pay_rate)::numeric, 2)::float8 AS margin
   FROM timesheets_invoices t
   JOIN placements p ON p.id = t.placement_id
   JOIN candidates cd ON cd.id = p.candidate_id
@@ -623,9 +632,16 @@ app.get('/api/timesheets', ar(async (req, res) => {
   res.json(await all(`${TIMESHEET_SELECT} ORDER BY t.period_end DESC`));
 }));
 
+// The amount may be left blank: it becomes hours x the placement's bill rate.
+async function timesheetAmount(b, placementId) {
+  if (b.amount !== undefined && b.amount !== null && b.amount !== '') return Number(b.amount) || 0;
+  const p = await get(`SELECT bill_rate FROM placements WHERE id = ?`, placementId);
+  return Math.round((Number(b.hours) || 0) * (Number(p?.bill_rate) || 0) * 100) / 100;
+}
+
 app.post('/api/timesheets', ar(async (req, res) => {
   const b = req.body || {};
-  const missing = missingField(b, ['placement_id', 'period_start', 'period_end', 'hours', 'amount', 'status']);
+  const missing = missingField(b, ['placement_id', 'period_start', 'period_end', 'hours', 'status']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('placements', b.placement_id))) return res.status(400).json({ error: 'placement_id does not reference a real placement' });
 
@@ -634,7 +650,7 @@ app.post('/api/timesheets', ar(async (req, res) => {
     VALUES (@placement_id, @period_start, @period_end, @hours, @amount, @status) RETURNING id
   `, {
     placement_id: b.placement_id, period_start: b.period_start, period_end: b.period_end,
-    hours: Number(b.hours) || 0, amount: Number(b.amount) || 0, status: b.status,
+    hours: Number(b.hours) || 0, amount: await timesheetAmount(b, b.placement_id), status: b.status,
   });
   res.status(201).json(await timesheetRow(info.rows[0].id));
 }));
@@ -643,19 +659,60 @@ app.put('/api/timesheets/:id', ar(async (req, res) => {
   const existing = await timesheetRow(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
   const b = req.body || {};
-  const missing = missingField(b, ['placement_id', 'period_start', 'period_end', 'hours', 'amount', 'status']);
+  const missing = missingField(b, ['placement_id', 'period_start', 'period_end', 'hours', 'status']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('placements', b.placement_id))) return res.status(400).json({ error: 'placement_id does not reference a real placement' });
 
+  const amount = await timesheetAmount(b, b.placement_id);
   await run(`
     UPDATE timesheets_invoices SET placement_id = @placement_id, period_start = @period_start, period_end = @period_end,
       hours = @hours, amount = @amount, status = @status
     WHERE id = @id
   `, {
     id: req.params.id, placement_id: b.placement_id, period_start: b.period_start, period_end: b.period_end,
-    hours: Number(b.hours) || 0, amount: Number(b.amount) || 0, status: b.status,
+    hours: Number(b.hours) || 0, amount, status: b.status,
   });
+  // The client approved a different number: the approval no longer stands.
+  if (Number(existing.hours) !== (Number(b.hours) || 0) || Number(existing.amount) !== amount) {
+    await run(`UPDATE timesheets_invoices SET client_approved_at = NULL, client_approved_by = NULL WHERE id = ?`, req.params.id);
+  }
   res.json(await timesheetRow(req.params.id));
+}));
+
+// Invoice data for the print page (INV-0001 style number, agency details, client, one line, total, due date, "Pay online" link).
+app.get('/api/timesheets/:id/invoice', ar(async (req, res) => {
+  const inv = await buildInvoice(Number(req.params.id) || 0);
+  if (!inv) return res.status(404).json({ error: 'not found' });
+  res.json(inv);
+}));
+
+// E-mails the invoice to the client's contact with their private portal link. Draft becomes Sent.
+app.post('/api/timesheets/:id/send-invoice', blockDemo, ar(async (req, res) => {
+  const t = await timesheetRow(req.params.id);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  const client = await get(`SELECT c.* FROM clients c JOIN placements p ON p.client_id = c.id WHERE p.id = ?`, t.placement_id);
+  if (!client.contact_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(client.contact_email)) return res.status(400).json({ error: 'This client has no valid contact e-mail. Add it on the Clients page.', code: 'no_contact_email' });
+  if (!client.portal_enabled || !client.portal_token) return res.status(409).json({ error: 'Turn on the client portal for this client first (Clients page).', code: 'portal_disabled' });
+  if (!isMailConfigured()) return res.status(503).json({ error: 'E-mail is not set up on this server yet. Ask your administrator.', code: 'email_not_configured' });
+  const a = await readProfile();
+  const base = (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const link = `${base}/#/portal/${client.portal_token}`;
+  const num = invoiceNumber(t.id);
+  const text = [
+    `Hello ${client.contact_name || ''},`.replace(' ,', ','),
+    '',
+    `${a.name || 'Your staffing partner'} sent you invoice ${num} for ${t.candidate_name} (${t.job_title}), period ${t.period_start} to ${t.period_end}: ${Number(t.hours)} hours, total $${Number(t.amount).toFixed(2)}.`,
+    '',
+    'You can review, approve and print it here:',
+    link,
+    ...(a.payment_url ? ['', `Pay online: ${a.payment_url}`] : []),
+    ...(a.payment_note ? ['', a.payment_note] : []),
+    '',
+    a.name || '',
+  ].join('\n');
+  await sendEmail({ to: client.contact_email, subject: `Invoice ${num} from ${a.name || 'your staffing partner'}`, text, replyTo: a.email || req.account?.email, fromName: a.name });
+  await run(`UPDATE timesheets_invoices SET invoice_sent_at = now(), status = CASE WHEN status = 'Draft' THEN 'Sent' ELSE status END WHERE id = ?`, t.id);
+  res.json(await timesheetRow(t.id));
 }));
 
 app.delete('/api/timesheets/:id', ar(async (req, res) => {
@@ -666,6 +723,9 @@ app.delete('/api/timesheets/:id', ar(async (req, res) => {
 }));
 
 // -------------------- activities (dashboard feed) --------------------
+mountPortalStaff(app, ar, { requirePlan, blockDemo });
+mountMessaging(app, ar, { requireOwner, blockDemo });
+
 app.get('/api/activities', ar(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 200);
   const rows = await all(`

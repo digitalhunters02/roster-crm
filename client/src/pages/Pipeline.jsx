@@ -8,6 +8,7 @@ import {
 import Icon from '../components/Icon.jsx';
 import { shortDate } from '../format.js';
 
+import { useT } from '../auth/i18n.js';
 const STAGES = ['Sourced', 'Screened', 'Submitted to Client', 'Client Interview', 'Offer', 'Placed', 'Rejected', 'Withdrawn'];
 const STAGE_COLOR = {
   Sourced: '#9498B3',
@@ -23,58 +24,60 @@ const STAGE_COLOR = {
 const EMPTY = { candidate_id: '', job_id: '', stage: 'Sourced', owner_user_id: '', submitted_date: '', notes: '' };
 
 function SubmissionForm({ initial, candidates, jobs, users, onCancel, onSubmit, saving, error }) {
+  const { t } = useT();
   const [values, setValues] = useState(initial);
   const set = (k) => (e) => setValues((v) => ({ ...v, [k]: e.target.value }));
 
   return (
     <Modal
-      title={initial.id ? 'Edit Submission' : 'New Submission'}
+      title={initial.id ? t('Edit Submission') : t('New Submission')}
       onClose={onCancel}
       wide
       footer={
         <>
-          <Button variant="outline" onClick={onCancel} disabled={saving}>Cancel</Button>
-          <Button onClick={() => onSubmit(values)} disabled={saving}>{saving ? 'Saving…' : 'Save Submission'}</Button>
+          <Button variant="outline" onClick={onCancel} disabled={saving}>{t('Cancel')}</Button>
+          <Button onClick={() => onSubmit(values)} disabled={saving}>{saving ? t('Saving…') : t('Save Submission')}</Button>
         </>
       }
     >
       <FormError error={error} />
       <FormGrid>
-        <Field label="Candidate" required>
+        <Field label={t('Candidate')} required>
           <SelectInput value={values.candidate_id} onChange={set('candidate_id')}>
-            <option value="">Select candidate…</option>
+            <option value="">{t('Select candidate…')}</option>
             {candidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </SelectInput>
         </Field>
-        <Field label="Job" required>
+        <Field label={t('Job')} required>
           <SelectInput value={values.job_id} onChange={set('job_id')}>
-            <option value="">Select job…</option>
+            <option value="">{t('Select job…')}</option>
             {jobs.map((j) => <option key={j.id} value={j.id}>{j.title} — {j.client_name}</option>)}
           </SelectInput>
         </Field>
-        <Field label="Stage" required>
+        <Field label={t('Stage')} required>
           <SelectInput value={values.stage} onChange={set('stage')}>
-            {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {STAGES.map((s) => <option key={s} value={s}>{t(s)}</option>)}
           </SelectInput>
         </Field>
-        <Field label="Owner" required>
+        <Field label={t('Owner')} required>
           <SelectInput value={values.owner_user_id} onChange={set('owner_user_id')}>
-            <option value="">Select owner…</option>
+            <option value="">{t('Select owner…')}</option>
             {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </SelectInput>
         </Field>
-        <Field label="Submitted date" required>
+        <Field label={t('Submitted date')} required>
           <TextInput type="date" value={values.submitted_date} onChange={set('submitted_date')} />
         </Field>
       </FormGrid>
-      <Field label="Notes">
-        <TextArea value={values.notes || ''} onChange={set('notes')} placeholder="Client feedback, next steps…" />
+      <Field label={t('Notes')}>
+        <TextArea value={values.notes || ''} onChange={set('notes')} placeholder={t('Client feedback, next steps…')} />
       </Field>
     </Modal>
   );
 }
 
 export default function Pipeline() {
+  const { t } = useT();
   const [subs, setSubs] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -97,7 +100,7 @@ export default function Pipeline() {
     api.users().then(setUsers);
   }, []);
 
-  if (!subs) return <Layout title="Pipeline"><Spinner /></Layout>;
+  if (!subs) return <Layout title={t('Pipeline')}><Spinner /></Layout>;
 
   async function changeStage(id, stage) {
     const updated = await api.setSubmissionStage(id, stage);
@@ -155,9 +158,9 @@ export default function Pipeline() {
 
   return (
     <Layout
-      title="Pipeline"
+      title={t('Pipeline')}
       count={subs.length}
-      actions={<Button onClick={openCreate}><Icon name="plus" size={15} /> New Submission</Button>}
+      actions={<Button onClick={openCreate}><Icon name="plus" size={15} /> {t('New Submission')}</Button>}
     >
       <div className="h-full flex gap-4 overflow-x-auto">
         {STAGES.map((stage) => {
@@ -166,7 +169,7 @@ export default function Pipeline() {
             <div key={stage} className="flex flex-col h-full min-h-0 w-72 flex-shrink-0">
               <div className="flex items-center gap-2 px-1 mb-2 flex-shrink-0">
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: STAGE_COLOR[stage] }} />
-                <p className="text-sm font-semibold text-ink">{stage}</p>
+                <p className="text-sm font-semibold text-ink">{t(stage)}</p>
                 <span className="text-xs text-muted">{items.length}</span>
               </div>
               <div className="flex-grow min-h-0 overflow-y-auto space-y-2.5 pr-1 pb-2">
@@ -175,13 +178,13 @@ export default function Pipeline() {
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <p className="text-sm font-medium text-ink leading-snug">{s.candidate_name}</p>
                       <div className="flex items-center gap-0.5 -mt-1 -mr-1">
-                        <IconButton icon="pencil" title="Edit" onClick={() => openEdit(s)} />
-                        <IconButton icon="trash" title="Delete" tone="danger" onClick={() => { setDeleteError(null); setDeleteRow(s); }} />
+                        <IconButton icon="pencil" title={t('Edit')} onClick={() => openEdit(s)} />
+                        <IconButton icon="trash" title={t('Delete')} tone="danger" onClick={() => { setDeleteError(null); setDeleteRow(s); }} />
                       </div>
                     </div>
                     <p className="text-xs text-muted mb-2.5">{s.job_title} · {s.client_name}</p>
                     <div className="flex items-center justify-between mb-2.5">
-                      <span className="text-xs text-muted">Submitted {shortDate(s.submitted_date)}</span>
+                      <span className="text-xs text-muted">{t('Submitted')} {shortDate(s.submitted_date)}</span>
                       <Avatar name={s.owner_name} color={s.owner_color} size={22} />
                     </div>
                     {s.notes && (
@@ -192,12 +195,12 @@ export default function Pipeline() {
                       onChange={(e) => changeStage(s.id, e.target.value)}
                       className="!text-xs !py-1.5 !bg-wash"
                     >
-                      {STAGES.map((st) => <option key={st} value={st}>{st}</option>)}
+                      {STAGES.map((st) => <option key={st} value={st}>{t(st)}</option>)}
                     </SelectInput>
                   </Card>
                 ))}
                 {items.length === 0 && (
-                  <p className="text-xs text-faint text-center py-6 border border-dashed border-line rounded-lg">No submissions</p>
+                  <p className="text-xs text-faint text-center py-6 border border-dashed border-line rounded-lg">{t('No submissions')}</p>
                 )}
               </div>
             </div>
@@ -220,8 +223,8 @@ export default function Pipeline() {
 
       {deleteRow && (
         <ConfirmDialog
-          title="Delete submission?"
-          message={`This will remove ${deleteRow.candidate_name}'s submission for ${deleteRow.job_title}.`}
+          title={t('Delete submission?')}
+          message={t('This will remove the submission of {name} for {job}.', { name: deleteRow.candidate_name, job: deleteRow.job_title })}
           error={deleteError}
           busy={deleteBusy}
           onCancel={() => setDeleteRow(null)}

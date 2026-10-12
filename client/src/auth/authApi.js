@@ -32,6 +32,7 @@ async function request(method, path, body) {
 
 export const authApi = {
   login: (email, password, remember) => request('POST', '/auth/login', { email, password, remember }),
+  demoRequest: (name, email) => request('POST', '/demo-request', { name, email }),
   forgot: (email) => request('POST', '/auth/forgot', { email }),
   reset: (token, password) => request('POST', '/auth/reset', { token, password }),
   me: () => request('GET', '/auth/me'),

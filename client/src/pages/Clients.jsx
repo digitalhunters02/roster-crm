@@ -9,6 +9,7 @@ import Icon from '../components/Icon.jsx';
 import { downloadCsv } from '../csv.js';
 import PhotoImportButton from '../components/PhotoImportButton.jsx';
 
+import { useT } from '../auth/i18n.js';
 const STATUS_TONE = { Active: 'green', Prospect: 'amber', Inactive: 'neutral' };
 const STATUS_OPTIONS = ['Active', 'Prospect', 'Inactive'];
 
@@ -18,61 +19,63 @@ const EMPTY = {
 };
 
 function ClientForm({ initial, users, onCancel, onSubmit, saving, error }) {
+  const { t } = useT();
   const [values, setValues] = useState(initial);
   const set = (k) => (e) => setValues((v) => ({ ...v, [k]: e.target.value }));
 
   return (
     <Modal
-      title={initial.id ? 'Edit Client' : 'New Client'}
+      title={initial.id ? t('Edit Client') : t('New Client')}
       onClose={onCancel}
       wide
       footer={
         <>
-          <Button variant="outline" onClick={onCancel} disabled={saving}>Cancel</Button>
-          <Button onClick={() => onSubmit(values)} disabled={saving}>{saving ? 'Saving…' : 'Save Client'}</Button>
+          <Button variant="outline" onClick={onCancel} disabled={saving}>{t('Cancel')}</Button>
+          <Button onClick={() => onSubmit(values)} disabled={saving}>{saving ? t('Saving…') : t('Save Client')}</Button>
         </>
       }
     >
       <FormError error={error} />
       <FormGrid>
-        <Field label="Company name" required>
-          <TextInput value={values.company_name} onChange={set('company_name')} placeholder="Northwind Analytics" />
+        <Field label={t('Company name')} required>
+          <TextInput value={values.company_name} onChange={set('company_name')} placeholder={t('Northwind Analytics')} />
         </Field>
-        <Field label="Industry" required>
-          <TextInput value={values.industry} onChange={set('industry')} placeholder="Data & Analytics SaaS" />
+        <Field label={t('Industry')}>
+          <TextInput value={values.industry} onChange={set('industry')} placeholder={t('Data & Analytics SaaS')} />
         </Field>
-        <Field label="Contact name" required>
-          <TextInput value={values.contact_name} onChange={set('contact_name')} placeholder="Grace Palmer" />
+        <Field label={t('Contact name')}>
+          <TextInput value={values.contact_name} onChange={set('contact_name')} placeholder={t('Grace Palmer')} />
         </Field>
-        <Field label="Contact email" required>
-          <TextInput type="email" value={values.contact_email} onChange={set('contact_email')} placeholder="grace.palmer@northwindanalytics.com" />
+        <Field label={t('Contact email')}>
+          <TextInput type="email" value={values.contact_email} onChange={set('contact_email')} placeholder={t('grace.palmer@northwindanalytics.com')} />
         </Field>
-        <Field label="Contact phone" required>
+        <Field label={t('Contact phone')}>
           <TextInput value={values.contact_phone} onChange={set('contact_phone')} placeholder="(512) 555-0118" />
         </Field>
-        <Field label="Address" required>
-          <TextInput value={values.address} onChange={set('address')} placeholder="400 Congress Ave, Austin, TX" />
+        <Field label={t('Address')}>
+          <TextInput value={values.address} onChange={set('address')} placeholder={t('400 Congress Ave, Austin, TX')} />
         </Field>
-        <Field label="Account owner" required>
+        <Field label={t('Account owner')} required>
           <SelectInput value={values.owner_user_id} onChange={set('owner_user_id')}>
-            <option value="">Select owner…</option>
+            <option value="">{t('Select owner…')}</option>
             {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </SelectInput>
         </Field>
-        <Field label="Status" required>
+        <Field label={t('Status')} required>
           <SelectInput value={values.status} onChange={set('status')}>
-            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{t(s)}</option>)}
           </SelectInput>
         </Field>
       </FormGrid>
-      <Field label="Notes">
-        <TextArea value={values.notes || ''} onChange={set('notes')} placeholder="Relationship notes, hiring patterns…" />
+      <Field label={t('Notes')}>
+        <TextArea value={values.notes || ''} onChange={set('notes')} placeholder={t('Relationship notes, hiring patterns…')} />
       </Field>
     </Modal>
   );
 }
 
 export default function Clients() {
+  const { t } = useT();
   const [rows, setRows] = useState(null);
   const [users, setUsers] = useState([]);
   const [modal, setModal] = useState(null);
@@ -91,7 +94,7 @@ export default function Clients() {
     api.users().then(setUsers);
   }, []);
 
-  if (!rows) return <Layout title="Clients"><Spinner /></Layout>;
+  if (!rows) return <Layout title={t('Clients')}><Spinner /></Layout>;
 
   function openCreate() {
     setFormError(null);
@@ -146,18 +149,18 @@ export default function Clients() {
   function handleExport() {
     downloadCsv(
       'roster-clients.csv',
-      ['Company', 'Industry', 'Contact', 'Email', 'Phone', 'Open Jobs', 'Placements', 'Owner', 'Status'],
+      [t('Company'), t('Industry'), t('Contact'), t('Email'), t('Phone'), t('Open Jobs'), t('Placements'), t('Owner'), t('Status')],
       rows.map((r) => [r.company_name, r.industry, r.contact_name, r.contact_email, r.contact_phone, r.open_job_count, r.placement_count, r.owner_name, r.status])
     );
   }
 
   const cols = [
-    { key: 'company_name', header: 'Client', render: (r) => <CellName primary={r.company_name} secondary={r.industry} /> },
-    { key: 'contact_name', header: 'Contact', render: (r) => <span className="text-sm text-muted">{r.contact_name}</span> },
-    { key: 'open_job_count', header: 'Open Jobs', render: (r) => r.open_job_count },
-    { key: 'placement_count', header: 'Placements', render: (r) => r.placement_count },
-    { key: 'owner_name', header: 'Owner', render: (r) => <Avatar name={r.owner_name} color={r.owner_color} size={24} /> },
-    { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
+    { key: 'company_name', header: t('Client'), render: (r) => <CellName primary={r.company_name} secondary={r.industry} /> },
+    { key: 'contact_name', header: t('Contact'), render: (r) => <span className="text-sm text-muted">{r.contact_name}</span> },
+    { key: 'open_job_count', header: t('Open Jobs'), render: (r) => r.open_job_count },
+    { key: 'placement_count', header: t('Placements'), render: (r) => r.placement_count },
+    { key: 'owner_name', header: t('Owner'), render: (r) => <Avatar name={r.owner_name} color={r.owner_color} size={24} /> },
+    { key: 'status', header: t('Status'), render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
     {
       key: 'actions', header: '', className: 'w-20',
       render: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />,
@@ -166,29 +169,29 @@ export default function Clients() {
 
   return (
     <Layout
-      title="Clients"
+      title={t('Clients')}
       count={rows.length}
       actions={
         <>
-          <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> Export</Button>
+          <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> {t('Export')}</Button>
           <PhotoImportButton
-            kind="clients" title="Import clients from a photo" onImported={load}
+            kind="clients" title={t('Import clients from a photo')} onImported={load}
             fields={[
-              { key: 'name', label: 'Company' }, { key: 'phone', label: 'photo.f.phone' }, { key: 'email', label: 'photo.f.email' },
-              { key: 'address', label: 'photo.f.address', wide: true }, { key: 'notes', label: 'photo.f.notes', wide: true },
+              { key: 'name', label: t('Company') }, { key: 'phone', label: t('photo.f.phone') }, { key: 'email', label: t('photo.f.email') },
+              { key: 'address', label: t('photo.f.address'), wide: true }, { key: 'notes', label: t('photo.f.notes'), wide: true },
             ]}
             validate={(r) => (String(r.name || '').trim() ? '' : 'photo.missingName')}
             toPayload={(r) => ({ name: r.name.trim(), phone: r.phone || '', email: r.email || '', address: r.address || '', notes: r.notes || '' })}
             onSave={async (b) => {
               const users = await api.users();
-              if (!users?.length) throw new Error('Add a recruiter first (Settings → Team).');
+              if (!users?.length) throw new Error(t('Add a recruiter first (Settings → Team).'));
               await api.createClient({
-                company_name: b.name, industry: 'Other', contact_name: b.name, contact_email: b.email || 'not-provided@example.com',
-                contact_phone: b.phone || '—', address: b.address || '—', owner_user_id: users[0].id, status: 'Prospect', notes: b.notes || null,
+                company_name: b.name, industry: '', contact_name: b.name, contact_email: b.email || '',
+                contact_phone: b.phone || '', address: b.address || '', owner_user_id: users[0].id, status: 'Prospect', notes: b.notes || null,
               });
             }}
           />
-          <Button onClick={openCreate}><Icon name="plus" size={15} /> New Client</Button>
+          <Button onClick={openCreate}><Icon name="plus" size={15} /> {t('New Client')}</Button>
         </>
       }
     >
@@ -209,8 +212,8 @@ export default function Clients() {
 
       {deleteRow && (
         <ConfirmDialog
-          title="Delete client?"
-          message={`This will permanently remove ${deleteRow.company_name}.`}
+          title={t('Delete client?')}
+          message={t('This will permanently remove {name}.', { name: deleteRow.company_name })}
           error={deleteError}
           busy={deleteBusy}
           onCancel={() => setDeleteRow(null)}

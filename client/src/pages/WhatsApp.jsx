@@ -5,10 +5,13 @@ import { Card, Mono, Spinner, Button, TextInput } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { shortDateTime } from '../format.js';
 
+import { useT } from '../auth/i18n.js';
+import { useFeatureGate } from '../billing/UpgradeNotice.jsx';
 // A flat conversation list keyed by phone number — WhatsApp Business messages
 // aren't necessarily tied to a candidate/client record, so this stays simple
 // rather than trying to resolve each number to a CRM contact.
-export default function WhatsApp() {
+function WhatsAppInner() {
+  const { t } = useT();
   const [connected, setConnected] = useState(null);
   const [conversations, setConversations] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -87,15 +90,15 @@ export default function WhatsApp() {
 
   if (connected === false) {
     return (
-      <Layout title="WhatsApp">
+      <Layout title={t('WhatsApp')}>
         <Card className="p-8 text-center max-w-md mx-auto mt-10">
           <span className="w-11 h-11 rounded-lg bg-greenTint text-green flex items-center justify-center mx-auto mb-3">
             <Icon name="phoneCall" size={18} />
           </span>
-          <h3 className="font-display text-base font-semibold text-ink mb-1">WhatsApp isn't connected yet</h3>
-          <p className="text-sm text-muted mb-4">Connect your company's WhatsApp Business number from Settings to start sending and receiving messages here.</p>
+          <h3 className="font-display text-base font-semibold text-ink mb-1">{t('WhatsApp isn\'t connected yet')}</h3>
+          <p className="text-sm text-muted mb-4">{t('Connect your company\'s WhatsApp Business number from Settings to start sending and receiving messages here.')}</p>
           <a href="#/settings">
-            <Button>Go to Settings</Button>
+            <Button>{t('Go to Settings')}</Button>
           </a>
         </Card>
       </Layout>
@@ -103,17 +106,17 @@ export default function WhatsApp() {
   }
 
   return (
-    <Layout title="WhatsApp">
+    <Layout title={t('WhatsApp')}>
       <Card className="flex h-[calc(100vh-9.5rem)] overflow-hidden">
         {/* Conversation list */}
         <div className="w-[280px] flex-shrink-0 border-r border-line flex flex-col min-h-0">
           <div className="px-4 py-3 border-b border-line flex-shrink-0">
-            <p className="text-xs font-semibold text-muted uppercase tracking-wide">Conversations</p>
+            <p className="text-xs font-semibold text-muted uppercase tracking-wide">{t('Conversations')}</p>
           </div>
           <div className="flex-1 overflow-y-auto min-h-0">
             {!conversations && <Spinner />}
             {conversations && conversations.length === 0 && (
-              <p className="text-sm text-muted px-4 py-6 text-center">No messages yet. Incoming WhatsApp messages will show up here.</p>
+              <p className="text-sm text-muted px-4 py-6 text-center">{t('No messages yet. Incoming WhatsApp messages will show up here.')}</p>
             )}
             {conversations && conversations.map((c) => (
               <button
@@ -127,7 +130,7 @@ export default function WhatsApp() {
                 <Mono name={c.contact_phone} color="#0E9488" size={32} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-ink truncate">{c.contact_phone}</p>
-                  <p className="text-xs text-muted truncate">{c.direction === 'out' ? 'You: ' : ''}{c.body}</p>
+                  <p className="text-xs text-muted truncate">{c.direction === 'out' ? t('You:') : ''}{c.body}</p>
                 </div>
               </button>
             ))}
@@ -137,9 +140,7 @@ export default function WhatsApp() {
         {/* Thread */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {!selected && (
-            <div className="flex-1 flex items-center justify-center text-sm text-muted">
-              Select a conversation to view messages.
-            </div>
+            <div className="flex-1 flex items-center justify-center text-sm text-muted">{t('Select a conversation to view messages.')}</div>
           )}
           {selected && (
             <>
@@ -172,11 +173,11 @@ export default function WhatsApp() {
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={onKeyDown}
-                    placeholder="Type a message…"
+                    placeholder={t('Type a message…')}
                     disabled={sending}
                   />
                   <Button onClick={send} disabled={sending || !draft.trim()}>
-                    {sending ? 'Sending…' : 'Send'}
+                    {sending ? t('Sending…') : t('Send')}
                   </Button>
                 </div>
               </div>
@@ -186,4 +187,11 @@ export default function WhatsApp() {
       </Card>
     </Layout>
   );
+}
+
+// The plan decides whether this area is open (Essential and up); the server also answers 402 to its API calls.
+export default function WhatsApp() {
+  const { t } = useT();
+  const locked = useFeatureGate('whatsapp', t('WhatsApp'));
+  return locked || <WhatsAppInner />;
 }

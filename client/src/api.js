@@ -67,6 +67,15 @@ export const api = {
       return data;
     },
   },
+  // ---- Planos, cobranca, perfil da agencia ----
+  billingStatus: () => get('/billing/status'),
+  billingCheckout: (plan, interval) => post('/billing/checkout', { plan, interval }),
+  billingPortal: () => post('/billing/portal', {}),
+  companyProfile: () => get('/company-profile'),
+  saveCompanyProfile: (body) => put('/company-profile', body),
+  parseResume: (text) => post('/candidates/parse-resume', { text }),
+  automationCatalog: () => get('/automations/catalog'),
+  runAutomationsNow: () => post('/automations/run-now', {}),
   dashboard: () => get('/dashboard'),
   reports: () => get('/reports'),
 

@@ -1,0 +1,6 @@
+{
+  "appId": "com.impactdigital.roster",
+  "appName": "Roster",
+  "webDir": "client/dist",
+  "server": { "androidScheme": "https" }
+}

@@ -42,6 +42,14 @@ export function AuthProvider({ children }) {
     setSession(next);
   }, []);
 
+  // 3-day free trial: a temporary login on the sample data (no password, no card).
+  const startTrial = useCallback(async (name, email) => {
+    const { token, account } = await authApi.demoRequest(name, email);
+    const next = { token, account };
+    writeSession(true, next);
+    setSession(next);
+  }, []);
+
   const logout = useCallback(() => {
     clearSession();
     setSession(null);
@@ -56,7 +64,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ token: session?.token || null, account: session?.account || null, checking, login, logout, replaceSession }}
+      value={{ token: session?.token || null, account: session?.account || null, checking, login, startTrial, logout, replaceSession }}
     >
       {children}
     </AuthContext.Provider>

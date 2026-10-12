@@ -110,6 +110,29 @@ app.post('/api/automations', (req, res, next) => (req.body?.active === false ? n
 app.patch('/api/automations/:id/active', (req, res, next) => (req.body?.active ? automationsLimit(req, res, next) : next()));
 accountRoutes(app, ar);
 
+// -------------------- agency profile (name, contact, logo): stored on the server, one per installation --------------------
+const PROFILE_FIELDS = ['name', 'address', 'phone', 'email', 'description'];
+async function readProfile() {
+  const row = await get(`SELECT value FROM app_meta WHERE key = 'company_profile'`);
+  let p = {}; try { p = row ? JSON.parse(row.value) : {}; } catch { /* corrupted: start over */ }
+  return { name: '', address: '', phone: '', email: '', description: '', logo: '', ...p };
+}
+app.get('/api/company-profile', ar(async (_req, res) => res.json(await readProfile())));
+app.put('/api/company-profile', requireOwner, ar(async (req, res) => {
+  const b = req.body || {};
+  const cur = await readProfile();
+  const next = { ...cur };
+  for (const f of PROFILE_FIELDS) if (typeof b[f] === 'string') next[f] = b[f].trim().slice(0, f === 'description' ? 600 : 200);
+  if (typeof b.logo === 'string') {
+    if (b.logo !== '' && !(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.logo) && b.logo.length <= 400_000)) {
+      return res.status(400).json({ error: 'The logo must be a PNG, JPEG or WebP image under 300 KB.', code: 'invalid_logo' });
+    }
+    next.logo = b.logo;
+  }
+  await run(`INSERT INTO app_meta (key, value) VALUES ('company_profile', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(next)]);
+  res.json(next);
+}));
+
 // -------------------- helpers --------------------
 function missingField(body, fields) {
   for (const f of fields) {

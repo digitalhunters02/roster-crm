@@ -1,3 +1,4 @@
+import { UI_STRINGS } from '../i18n/uiStrings.js';
 // Sign-in / account strings in English, Portuguese and Spanish.
 // Placeholders like {name} are filled by t(key, { name }).
 export const AUTH_STRINGS = {
@@ -203,3 +204,7 @@ export const AUTH_STRINGS = {
     privacyTitle: 'Política de Privacidad',
   },
 };
+
+// Screen texts (English key -> translation) live in i18n/uiStrings.js.
+Object.assign(AUTH_STRINGS.pt, UI_STRINGS.pt);
+Object.assign(AUTH_STRINGS.es, UI_STRINGS.es);

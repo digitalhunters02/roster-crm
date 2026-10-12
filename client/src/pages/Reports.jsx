@@ -8,6 +8,7 @@ import Icon from '../components/Icon.jsx';
 import { money, pct } from '../format.js';
 import { downloadCsv } from '../csv.js';
 
+import { useT } from '../auth/i18n.js';
 const STAGE_ORDER = ['Sourced', 'Screened', 'Submitted to Client', 'Client Interview', 'Offer', 'Placed', 'Rejected', 'Withdrawn'];
 const STAGE_COLOR = {
   Sourced: '#9498B3', Screened: '#2F6FE0', 'Submitted to Client': '#C98A1D', 'Client Interview': '#FF6B57',
@@ -17,57 +18,58 @@ const INVOICE_TONE = { Draft: 'neutral', Sent: 'blue', Paid: 'green', Overdue: '
 const RECRUITER_COLORS = ['#5B4EE0', '#2F6FE0', '#0E9488', '#FF6B57', '#C98A1D', '#D1477A'];
 
 export default function Reports() {
+  const { t } = useT();
   const [data, setData] = useState(null);
 
   useEffect(() => {
     api.reports().then(setData);
   }, []);
 
-  if (!data) return <Layout title="Reports"><Spinner /></Layout>;
+  if (!data) return <Layout title={t('Reports')}><Spinner /></Layout>;
 
   const funnelData = STAGE_ORDER
     .map((s) => data.funnelByStage.find((f) => f.stage === s))
     .filter(Boolean)
-    .map((f) => ({ label: f.stage, value: f.count, color: STAGE_COLOR[f.stage] }));
+    .map((f) => ({ label: t(f.stage), value: f.count, color: STAGE_COLOR[f.stage] }));
 
   const recruiterData = data.placementsByRecruiter.map((r, i) => ({
     label: r.recruiter_name, value: r.total_fees, color: r.recruiter_color || RECRUITER_COLORS[i % RECRUITER_COLORS.length],
-    display: `${money(r.total_fees, true)} · ${r.placement_count} placement${r.placement_count === 1 ? '' : 's'}`,
+    display: r.placement_count === 1 ? t('{amount} · 1 placement', { amount: money(r.total_fees, true) }) : t('{amount} · {n} placements', { amount: money(r.total_fees, true), n: r.placement_count }),
   }));
 
   function exportFunnel() {
-    downloadCsv('roster-pipeline-funnel.csv', ['Stage', 'Count'], data.funnelByStage.map((f) => [f.stage, f.count]));
+    downloadCsv('roster-pipeline-funnel.csv', [t('Stage'), t('Count')], data.funnelByStage.map((f) => [f.stage, f.count]));
   }
   function exportByRecruiter() {
     downloadCsv(
       'roster-placements-by-recruiter.csv',
-      ['Recruiter', 'Placements', 'Total Fees'],
+      [t('Recruiter'), t('Placements'), t('Total Fees')],
       data.placementsByRecruiter.map((r) => [r.recruiter_name, r.placement_count, r.total_fees])
     );
   }
   function exportByMonth() {
     downloadCsv(
       'roster-placements-by-month.csv',
-      ['Month', 'Placements', 'Total Fees'],
+      [t('Month'), t('Placements'), t('Total Fees')],
       data.placementsByMonth.map((m) => [m.month, m.count, m.total_fees])
     );
   }
 
   return (
-    <Layout title="Reports">
+    <Layout title={t('Reports')}>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <Kpi label="Placement Rate" value={pct(data.placementRate)} sub={`${data.placed} placed of ${data.decided} decided`} tone="brand" icon="target" />
-        <Kpi label="Total Placement Fees" value={money(data.totalPlacementFees, true)} sub="All-time" tone="green" icon="badge" />
-        <Kpi label="Total Invoiced" value={money(data.totalInvoiced, true)} sub="All timesheets" tone="teal" icon="receipt" />
-        <Kpi label="Submissions" value={data.funnelByStage.reduce((s, f) => s + f.count, 0)} sub="All-time volume" tone="blue" icon="funnel" />
+        <Kpi label={t('Placement Rate')} value={pct(data.placementRate)} sub={t('{placed} placed of {decided} decided', { placed: data.placed, decided: data.decided })} tone="brand" icon="target" />
+        <Kpi label={t('Total Placement Fees')} value={money(data.totalPlacementFees, true)} sub={t('All-time')} tone="green" icon="badge" />
+        <Kpi label={t('Total Invoiced')} value={money(data.totalInvoiced, true)} sub={t('All timesheets')} tone="teal" icon="receipt" />
+        <Kpi label={t('Submissions')} value={data.funnelByStage.reduce((s, f) => s + f.count, 0)} sub={t('All-time volume')} tone="blue" icon="funnel" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <Card className="p-1">
           <CardHead
-            title="Pipeline Funnel by Stage"
-            sub="All submissions, all-time"
-            action={<Button variant="outline" size="sm" onClick={exportFunnel}><Icon name="download" size={13} /> Export</Button>}
+            title={t('Pipeline Funnel by Stage')}
+            sub={t('All submissions, all-time')}
+            action={<Button variant="outline" size="sm" onClick={exportFunnel}><Icon name="download" size={13} /> {t('Export')}</Button>}
           />
           <div className="px-5 pb-5">
             <ColBars data={funnelData} height={220} formatValue={(v) => v} />
@@ -76,14 +78,14 @@ export default function Reports() {
 
         <Card className="p-1">
           <CardHead
-            title="Placements & Fees by Recruiter"
-            sub="Total placement fees earned"
-            action={<Button variant="outline" size="sm" onClick={exportByRecruiter}><Icon name="download" size={13} /> Export</Button>}
+            title={t('Placements & Fees by Recruiter')}
+            sub={t('Total placement fees earned')}
+            action={<Button variant="outline" size="sm" onClick={exportByRecruiter}><Icon name="download" size={13} /> {t('Export')}</Button>}
           />
           <div className="px-5 pb-5">
             {recruiterData.length > 0
               ? <HBars data={recruiterData} formatValue={(v) => money(v, true)} />
-              : <p className="text-sm text-muted py-6 text-center">No placements yet.</p>}
+              : <p className="text-sm text-muted py-6 text-center">{t('No placements yet.')}</p>}
           </div>
         </Card>
       </div>
@@ -91,32 +93,32 @@ export default function Reports() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-1">
           <CardHead
-            title="Placements by Month"
-            sub="Count and fees per month"
-            action={<Button variant="outline" size="sm" onClick={exportByMonth}><Icon name="download" size={13} /> Export</Button>}
+            title={t('Placements by Month')}
+            sub={t('Count and fees per month')}
+            action={<Button variant="outline" size="sm" onClick={exportByMonth}><Icon name="download" size={13} /> {t('Export')}</Button>}
           />
           <div className="divide-y divide-lineSoft">
             {data.placementsByMonth.map((m) => (
               <div key={m.month} className="flex items-center justify-between px-5 py-3.5">
                 <div className="flex items-center gap-2.5">
                   <Badge tone="neutral">{m.month}</Badge>
-                  <span className="text-sm text-muted">{m.count} placement{m.count === 1 ? '' : 's'}</span>
+                  <span className="text-sm text-muted">{m.count} {t('placement')}{m.count === 1 ? '' : 's'}</span>
                 </div>
                 <span className="text-sm font-medium text-ink">{money(m.total_fees)}</span>
               </div>
             ))}
-            {data.placementsByMonth.length === 0 && <p className="text-sm text-muted py-6 text-center">No placements yet.</p>}
+            {data.placementsByMonth.length === 0 && <p className="text-sm text-muted py-6 text-center">{t('No placements yet.')}</p>}
           </div>
         </Card>
 
         <Card className="p-1">
-          <CardHead title="Invoice Aging" sub="Timesheets & invoices by status" />
+          <CardHead title={t('Invoice Aging')} sub={t('Timesheets & invoices by status')} />
           <div className="divide-y divide-lineSoft">
             {data.invoiceAging.map((inv) => (
               <div key={inv.status} className="flex items-center justify-between px-5 py-3.5">
                 <div className="flex items-center gap-2.5">
                   <Badge tone={INVOICE_TONE[inv.status] || 'neutral'}>{inv.status}</Badge>
-                  <span className="text-sm text-muted">{inv.count} invoice{inv.count === 1 ? '' : 's'}</span>
+                  <span className="text-sm text-muted">{inv.count} {t('invoice')}{inv.count === 1 ? '' : 's'}</span>
                 </div>
                 <span className="text-sm font-medium text-ink">{money(inv.amount)}</span>
               </div>

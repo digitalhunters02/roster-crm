@@ -3,7 +3,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import api from '../api.js';
 import { getToken } from '../auth/session.js';
 
-const EMPTY = { name: '', address: '', phone: '', email: '', description: '', logo: '' };
+const EMPTY = { name: '', address: '', phone: '', email: '', description: '', logo: '', payment_url: '', payment_note: '' };
 let state = null;
 let loading = false;
 const listeners = new Set();

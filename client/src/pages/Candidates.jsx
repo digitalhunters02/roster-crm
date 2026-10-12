@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import api from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
-  Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog,
+  Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog, IconButton,
   Field, TextInput, TextArea, SelectInput, FormGrid, FormError, RowActions,
 } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
+import MessagesModal from '../components/MessagesModal.jsx';
 import { shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
 import PhotoImportButton from '../components/PhotoImportButton.jsx';
@@ -126,6 +127,7 @@ export default function Candidates() {
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [messagesFor, setMessagesFor] = useState(null);
 
   function load() {
     api.candidates().then(setRows);
@@ -204,8 +206,13 @@ export default function Candidates() {
     { key: 'submission_count', header: t('Submissions'), render: (r) => r.submission_count },
     { key: 'created_at', header: t('Added'), render: (r) => shortDate(r.created_at) },
     {
-      key: 'actions', header: '', className: 'w-20',
-      render: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />,
+      key: 'actions', header: '', className: 'w-28',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-0.5">
+          <IconButton icon="mail" title={t('Messages')} onClick={() => setMessagesFor(r)} />
+          <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
+        </div>
+      ),
     },
   ];
 
@@ -219,7 +226,7 @@ export default function Candidates() {
           <PhotoImportButton
             kind="clients" title={t('Import candidates from a photo')} onImported={load}
             fields={[
-              { key: 'name', label: t('photo.f.name') }, { key: 'phone', label: t('photo.f.phone') }, { key: 'email', label: t('photo.f.email') },
+              { key: 'name', label: 'photo.f.name' }, { key: 'phone', label: 'photo.f.phone' }, { key: 'email', label: 'photo.f.email' },
               { key: 'notes', label: t('Title, employer or skills'), wide: true },
             ]}
             validate={(r) => (String(r.name || '').trim() ? '' : 'photo.missingName')}
@@ -251,6 +258,8 @@ export default function Candidates() {
           error={formError}
         />
       )}
+
+      {messagesFor && <MessagesModal candidate={messagesFor} onClose={() => setMessagesFor(null)} />}
 
       {deleteRow && (
         <ConfirmDialog

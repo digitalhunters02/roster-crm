@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import api from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
-  Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog,
+  Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog, IconButton, Kpi,
   Field, TextInput, SelectInput, FormGrid, FormError, RowActions,
 } from '../components/ui.jsx';
+import InvoiceView from '../components/InvoiceView.jsx';
 import Icon from '../components/Icon.jsx';
 import { money, shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
@@ -61,7 +62,7 @@ function TimesheetForm({ initial, placements, onCancel, onSubmit, saving, error 
         <Field label={t('Hours')} required>
           <TextInput type="number" min="0" step="0.5" value={values.hours} onChange={set('hours')} placeholder="80" />
         </Field>
-        <Field label={t('Amount')} required>
+        <Field label={t('Amount')} hint={t('Leave blank to use hours x the bill rate.')}>
           <TextInput type="number" min="0" step="0.01" value={values.amount} onChange={set('amount')} placeholder="7600" />
         </Field>
       </FormGrid>
@@ -79,6 +80,10 @@ function TimesheetsInner() {
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [invoiceFor, setInvoiceFor] = useState(null);
+  const [sendRow, setSendRow] = useState(null);
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sendError, setSendError] = useState(null);
 
   function load() {
     api.timesheets().then(setRows);
@@ -140,23 +145,56 @@ function TimesheetsInner() {
     }
   }
 
+  async function handleSend() {
+    setSendBusy(true);
+    setSendError(null);
+    try {
+      const updated = await api.sendInvoice(sendRow.id);
+      setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      setSendRow(null);
+    } catch (e) {
+      setSendError(e.message);
+    } finally {
+      setSendBusy(false);
+    }
+  }
+
   function handleExport() {
     downloadCsv(
       'roster-timesheets.csv',
-      [t('Candidate'), t('Client'), t('Period Start'), t('Period End'), t('Hours'), t('Amount'), t('Status')],
-      rows.map((r) => [r.candidate_name, r.client_name, r.period_start, r.period_end, r.hours, r.amount, r.status])
+      [t('Candidate'), t('Client'), t('Period Start'), t('Period End'), t('Hours'), t('Amount'), t('Cost'), t('Margin'), t('Status')],
+      rows.map((r) => [r.candidate_name, r.client_name, r.period_start, r.period_end, r.hours, r.amount, r.cost, r.margin, r.status])
     );
   }
+
+  const billed = rows.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+  const cost = rows.reduce((a, r) => a + (Number(r.cost) || 0), 0);
 
   const cols = [
     { key: 'candidate_name', header: t('Candidate'), render: (r) => <CellName primary={r.candidate_name} secondary={`${r.client_name} · ${r.job_title}`} /> },
     { key: 'period', header: t('Period'), render: (r) => <span className="text-sm text-muted">{shortDate(r.period_start)} – {shortDate(r.period_end)}</span> },
     { key: 'hours', header: t('Hours'), render: (r) => r.hours },
     { key: 'amount', header: t('Amount'), render: (r) => <span className="font-medium">{money(r.amount)}</span> },
-    { key: 'status', header: t('Status'), render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
+    { key: 'margin', header: t('Margin'), render: (r) => <span className={`text-sm font-medium ${r.margin < 0 ? 'text-rose' : 'text-green'}`} title={`${t('Cost')}: ${money(r.cost)}`}>{money(r.margin)}</span> },
     {
-      key: 'actions', header: '', className: 'w-20',
-      render: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />,
+      key: 'status', header: t('Status'),
+      render: (r) => (
+        <div className="flex flex-wrap items-center gap-1">
+          <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge>
+          {r.client_approved_at && <Badge tone="green">{t('Client approved')}</Badge>}
+          {!r.client_approved_at && r.client_dispute_note && <span title={r.client_dispute_note}><Badge tone="rose">{t('Client disputed')}</Badge></span>}
+        </div>
+      ),
+    },
+    {
+      key: 'actions', header: '', className: 'w-36',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-0.5">
+          <IconButton icon="receipt" title={t('View invoice')} onClick={() => setInvoiceFor(r)} />
+          <IconButton icon="mail" title={t('Send invoice to client')} onClick={() => { setSendError(null); setSendRow(r); }} />
+          <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
+        </div>
+      ),
     },
   ];
 
@@ -171,6 +209,12 @@ function TimesheetsInner() {
         </>
       }
     >
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4" data-testid="timesheet-kpis">
+        <Kpi label={t('Billed')} value={money(billed)} />
+        <Kpi label={t('Paid to workers')} value={money(cost)} />
+        <Kpi label={t('Margin')} value={money(billed - cost)} />
+        <Kpi label={t('Margin %')} value={billed ? `${Math.round(((billed - cost) / billed) * 100)}%` : '-'} />
+      </div>
       <Card>
         <Table cols={cols} rows={rows} />
       </Card>
@@ -184,6 +228,25 @@ function TimesheetsInner() {
           saving={saving}
           error={formError}
         />
+      )}
+
+      {invoiceFor && <InvoiceView load={() => api.timesheetInvoice(invoiceFor.id)} onClose={() => setInvoiceFor(null)} />}
+
+      {sendRow && (
+        <Modal
+          title={t('Send invoice to client?')}
+          onClose={() => setSendRow(null)}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setSendRow(null)} disabled={sendBusy}>{t('Cancel')}</Button>
+              <Button onClick={handleSend} disabled={sendBusy} data-testid="send-invoice-confirm">{sendBusy ? t('Sending…') : t('Send')}</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-muted">{t('We will e-mail the invoice to the contact at {name}, with their private portal link. A draft becomes Sent.', { name: sendRow.client_name })}</p>
+          <p className="text-xs text-faint mt-2">{t('The client portal must be turned on for this client (Clients page).')}</p>
+          <FormError error={sendError} />
+        </Modal>
       )}
 
       {deleteRow && (

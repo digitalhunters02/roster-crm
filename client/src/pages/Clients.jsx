@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import ClientPortalModal from '../components/ClientPortalModal.jsx';
 import api from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
-  Card, Table, Badge, CellName, Avatar, Spinner, Button, Modal, ConfirmDialog,
+  Card, Table, Badge, CellName, Avatar, Spinner, Button, Modal, ConfirmDialog, IconButton,
   Field, TextInput, TextArea, SelectInput, FormGrid, FormError, RowActions,
 } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
@@ -84,6 +85,7 @@ export default function Clients() {
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [portalFor, setPortalFor] = useState(null);
 
   function load() {
     api.clients().then(setRows);
@@ -162,8 +164,13 @@ export default function Clients() {
     { key: 'owner_name', header: t('Owner'), render: (r) => <Avatar name={r.owner_name} color={r.owner_color} size={24} /> },
     { key: 'status', header: t('Status'), render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
     {
-      key: 'actions', header: '', className: 'w-20',
-      render: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />,
+      key: 'actions', header: '', className: 'w-28',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-0.5">
+          <IconButton icon="arrowUpRight" title={t('Client portal')} onClick={() => setPortalFor(r)} />
+          <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
+        </div>
+      ),
     },
   ];
 
@@ -177,8 +184,8 @@ export default function Clients() {
           <PhotoImportButton
             kind="clients" title={t('Import clients from a photo')} onImported={load}
             fields={[
-              { key: 'name', label: t('Company') }, { key: 'phone', label: t('photo.f.phone') }, { key: 'email', label: t('photo.f.email') },
-              { key: 'address', label: t('photo.f.address'), wide: true }, { key: 'notes', label: t('photo.f.notes'), wide: true },
+              { key: 'name', label: t('Company') }, { key: 'phone', label: 'photo.f.phone' }, { key: 'email', label: 'photo.f.email' },
+              { key: 'address', label: 'photo.f.address', wide: true }, { key: 'notes', label: 'photo.f.notes', wide: true },
             ]}
             validate={(r) => (String(r.name || '').trim() ? '' : 'photo.missingName')}
             toPayload={(r) => ({ name: r.name.trim(), phone: r.phone || '', email: r.email || '', address: r.address || '', notes: r.notes || '' })}
@@ -209,6 +216,8 @@ export default function Clients() {
           error={formError}
         />
       )}
+
+      {portalFor && <ClientPortalModal client={portalFor} onClose={() => setPortalFor(null)} onChanged={load} />}
 
       {deleteRow && (
         <ConfirmDialog

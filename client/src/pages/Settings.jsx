@@ -12,6 +12,43 @@ import { MyAccountCard, StaffCard } from '../auth/AccountPanel.jsx';
 import { useT } from '../auth/i18n.js';
 import PlanCard from '../billing/PlanCard.jsx';
 import { useProfile, saveProfile } from '../profile/useProfile.js';
+function SmsConnectForm({ webhookUrl, onClose, onConnected }) {
+  const { t } = useT();
+  const [v, setV] = useState({ account_sid: '', auth_token: '', from_number: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (k) => (e) => setV((p) => ({ ...p, [k]: e.target.value }));
+  async function submit() {
+    setBusy(true); setError(null);
+    try { await api.smsConnect(v); onConnected(); } catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal
+      title={t('Connect SMS (Twilio)')}
+      sub={t('Texts are sent from your own Twilio account and number, so the cost and the sender are yours.')}
+      onClose={onClose}
+      footer={<>
+        <Button variant="outline" onClick={onClose} disabled={busy}>{t('Cancel')}</Button>
+        <Button onClick={submit} disabled={busy || !v.account_sid || !v.auth_token || !v.from_number} data-testid="sms-connect-save">{busy ? t('Connecting…') : t('Connect')}</Button>
+      </>}
+    >
+      <FormError error={error} />
+      <Field label={t('Account SID')} required hint={t('Starts with AC. Find it on your Twilio console home page.')}>
+        <TextInput value={v.account_sid} onChange={set('account_sid')} placeholder="AC…" autoComplete="off" data-testid="sms-sid" />
+      </Field>
+      <Field label={t('Auth Token')} required hint={t('Stored encrypted and never shown again.')}>
+        <TextInput type="password" value={v.auth_token} onChange={set('auth_token')} autoComplete="new-password" data-testid="sms-token" />
+      </Field>
+      <Field label={t('Twilio phone number')} required>
+        <TextInput value={v.from_number} onChange={set('from_number')} placeholder="+15125550123" data-testid="sms-from" />
+      </Field>
+      <Field label={t('Reply webhook')} hint={t('In Twilio, set this as “A message comes in” for your number so replies and STOP show up here.')}>
+        <TextInput readOnly value={webhookUrl || ''} onFocus={(e) => e.target.select()} />
+      </Field>
+    </Modal>
+  );
+}
+
 const WHATSAPP_WEBHOOK_URL = `${BASE}/integrations/whatsapp/webhook`;
 
 function WhatsAppConnectForm({ onClose, onConnected }) {
@@ -100,6 +137,15 @@ export default function Settings() {
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState('');
 
+  const [smsStatus, setSmsStatus] = useState(null);
+  const [smsModal, setSmsModal] = useState(false);
+  const [smsBusy, setSmsBusy] = useState(false);
+  const refreshSms = () => api.smsStatus().then(setSmsStatus).catch(() => setSmsStatus({ connected: false }));
+  async function disconnectSms() {
+    setSmsBusy(true);
+    try { await api.smsDisconnect(); await refreshSms(); } finally { setSmsBusy(false); }
+  }
+
   const [waStatus, setWaStatus] = useState(null);
   const [waModalOpen, setWaModalOpen] = useState(false);
   const [waBusy, setWaBusy] = useState(false);
@@ -136,6 +182,7 @@ export default function Settings() {
     api.clients().then(setClients);
     api.placements().then(setPlacements);
     refreshWhatsAppStatus();
+    refreshSms();
   }, []);
 
   function startEditProfile() {
@@ -151,13 +198,13 @@ export default function Settings() {
   async function submitProfile() {
     setProfileError('');
     try {
-      const { name, address, phone, email, description } = draftProfile;
-      await saveProfile({ name, address, phone, email, description });
+      const { name, address, phone, email, description, payment_url, payment_note } = draftProfile;
+      await saveProfile({ name, address, phone, email, description, payment_url, payment_note });
       setEditingProfile(false);
       setProfileSaved(true);
       setTimeout(() => setProfileSaved(false), 3000);
-    } catch {
-      setProfileError(t('Only the account owner can change the agency profile.'));
+    } catch (e) {
+      setProfileError(e.status === 400 ? e.message : t('Only the account owner can change the agency profile.'));
     }
   }
 
@@ -275,6 +322,13 @@ export default function Settings() {
                 <Field label={t('Description')}>
                   <TextArea value={draftProfile.description} onChange={(e) => setDraftProfile((v) => ({ ...v, description: e.target.value }))} />
                 </Field>
+                <Field label={t('Online payment link')} hint={t('Optional. Your own payment page (Stripe Payment Link, Square, PayPal…). It becomes the “Pay online” button on invoices.')}>
+                  <TextInput value={draftProfile.payment_url || ''} placeholder="https://" onChange={(e) => setDraftProfile((v) => ({ ...v, payment_url: e.target.value }))} data-testid="profile-payment-url" />
+                </Field>
+                <Field label={t('Payment instructions')} hint={t('Shown on invoices, for example “Net 15. ACH details on request.”')}>
+                  <TextArea value={draftProfile.payment_note || ''} onChange={(e) => setDraftProfile((v) => ({ ...v, payment_note: e.target.value }))} />
+                </Field>
+                {profileError && <p className="text-sm text-rose mb-2" role="alert">{profileError}</p>}
                 <div className="flex items-center justify-end gap-2 pt-1">
                   <Button variant="outline" size="sm" onClick={cancelEditProfile}>{t('Cancel')}</Button>
                   <Button size="sm" onClick={submitProfile}>{t('Save')}</Button>
@@ -334,6 +388,35 @@ export default function Settings() {
           </div>
         </Card>
 
+        <Card className="p-1" data-testid="sms-card">
+          <CardHead
+            title={t('SMS (Twilio)')}
+            sub={t('Text candidates from your own Twilio number')}
+            action={
+              !owner ? null : smsStatus && smsStatus.connected ? (
+                <Button variant="outline" size="sm" onClick={disconnectSms} disabled={smsBusy}>{smsBusy ? t('Disconnecting…') : t('Disconnect')}</Button>
+              ) : (
+                <Button size="sm" onClick={() => setSmsModal(true)} data-testid="sms-connect-open">{t('Connect')}</Button>
+              )
+            }
+          />
+          <div className="px-5 pb-5 text-sm">
+            {!smsStatus && <p className="text-muted">{t('Checking connection…')}</p>}
+            {smsStatus && smsStatus.connected && (
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-lg bg-greenTint text-green flex items-center justify-center flex-shrink-0"><Icon name="phoneCall" size={15} /></span>
+                <div>
+                  <p className="font-semibold text-ink">{t('Connected')}</p>
+                  <p className="text-xs text-muted">{smsStatus.from_number}</p>
+                </div>
+              </div>
+            )}
+            {smsStatus && !smsStatus.connected && (
+              <p className="text-muted">{t('Not connected. Paste your Twilio Account SID, Auth Token and phone number to send texts from the Candidates page.')}</p>
+            )}
+          </div>
+        </Card>
+
         <Card className="p-1">
           <CardHead title={t('Data Export')} sub={t('Download CSVs of your core records')} />
           <div className="divide-y divide-lineSoft">
@@ -357,6 +440,7 @@ export default function Settings() {
         </Card>
       </div>
 
+      {smsModal && <SmsConnectForm webhookUrl={smsStatus?.webhook_url} onClose={() => setSmsModal(false)} onConnected={() => { setSmsModal(false); refreshSms(); }} />}
       {waModalOpen && <WhatsAppConnectForm onClose={() => setWaModalOpen(false)} onConnected={onWhatsAppConnected} />}
     </Layout>
   );

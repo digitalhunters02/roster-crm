@@ -52,7 +52,38 @@ function del(path) {
   return fetch(BASE + path, { method: 'DELETE', headers: authHeaders() }).then(handle);
 }
 
+// Public calls of the client portal (no login: the private link is the key). A 401 here must not sign anyone out.
+async function portalHandle(r) {
+  const data = await r.json().catch(() => null);
+  if (!r.ok) throw Object.assign(new Error((data && data.error) || `Request failed (${r.status})`), { status: r.status, code: data?.code });
+  return data;
+}
+const portalGet = (path) => fetch(`${BASE}/portal/${path}`).then(portalHandle);
+const portalPost = (path, body) => fetch(`${BASE}/portal/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then(portalHandle);
+export const portalApi = {
+  load: (token) => portalGet(encodeURIComponent(token)),
+  feedback: (token, body) => portalPost(`${encodeURIComponent(token)}/feedback`, body),
+  approve: (token, id, body) => portalPost(`${encodeURIComponent(token)}/timesheets/${id}/approve`, body),
+  dispute: (token, id, body) => portalPost(`${encodeURIComponent(token)}/timesheets/${id}/dispute`, body),
+  invoice: (token, id) => portalGet(`${encodeURIComponent(token)}/invoices/${id}`),
+};
+
 export const api = {
+  // ---- Etapa 2: portal do cliente, fatura, mensagens ----
+  clientPortal: (id) => get(`/clients/${id}/portal`),
+  clientPortalAction: (id, action) => post(`/clients/${id}/portal/${action}`, {}),
+  timesheetInvoice: (id) => get(`/timesheets/${id}/invoice`),
+  sendInvoice: (id) => post(`/timesheets/${id}/send-invoice`, {}),
+  messageTemplates: () => get('/message-templates'),
+  createMessageTemplate: (body) => post('/message-templates', body),
+  deleteMessageTemplate: (id) => del(`/message-templates/${id}`),
+  candidateMessages: (id) => get(`/candidates/${id}/messages`),
+  previewMessage: (id, body) => post(`/candidates/${id}/messages/preview`, body),
+  sendMessage: (id, body) => post(`/candidates/${id}/messages`, body),
+  smsStatus: () => get('/integrations/sms/status'),
+  smsConnect: (body) => post('/integrations/sms/connect', body),
+  smsDisconnect: () => post('/integrations/sms/disconnect', {}),
+
   // ---- Importar de foto (a IA lê a imagem; nada é guardado no servidor) ----
   photoApi: {
     status: () => get('/photo-import/status'),

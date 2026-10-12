@@ -11,7 +11,7 @@ const PLAN_ORDER = ['basico', 'essencial', 'completo'];
 const FEATURES = {
   basico: ['Clients, jobs, candidates, pipeline and interviews', 'Up to {users} logins, {candidates} candidates, {openJobs} open jobs', 'Import from photo and simple resume reading', '2 automations that really run', 'English, Portuguese and Spanish'],
   essencial: ['Everything in Basic', 'Up to {users} logins, unlimited candidates and open jobs', 'Timesheets, margin per placement and invoices', 'WhatsApp inbox for the whole team', 'Unlimited automations'],
-  completo: ['Everything in Essential', 'Up to {users} logins', 'Priority for new tools: AI, e-signature, payroll export', 'All future Complete tools included'],
+  completo: ['Everything in Essential', 'Up to {users} logins', 'AI profiles and job posts, suggested candidates', 'E-signature with your Documenso account', 'Documents with expiry reminders and payroll hours export', 'API keys, webhooks and several offices'],
 };
 const LIMITS_BY_PLAN = { basico: { users: 3, candidates: '1,000', openJobs: 25 }, essencial: { users: 8 }, completo: { users: 25 } };
 const usd = (n) => `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 })}`;

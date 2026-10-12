@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useBilling } from '../billing/useBilling.js';
 import ClientPortalModal from '../components/ClientPortalModal.jsx';
+import DocsSignaturesModal from '../components/DocsSignaturesModal.jsx';
+import OfficeField, { OfficeFilter } from '../offices/OfficeField.jsx';
 import api from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
@@ -16,7 +19,7 @@ const STATUS_OPTIONS = ['Active', 'Prospect', 'Inactive'];
 
 const EMPTY = {
   company_name: '', industry: '', contact_name: '', contact_email: '', contact_phone: '',
-  address: '', owner_user_id: '', status: 'Prospect', notes: '',
+  address: '', owner_user_id: '', status: 'Prospect', notes: '', office_id: '',
 };
 
 function ClientForm({ initial, users, onCancel, onSubmit, saving, error }) {
@@ -67,6 +70,7 @@ function ClientForm({ initial, users, onCancel, onSubmit, saving, error }) {
             {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{t(s)}</option>)}
           </SelectInput>
         </Field>
+        <OfficeField value={values.office_id} onChange={set('office_id')} />
       </FormGrid>
       <Field label={t('Notes')}>
         <TextArea value={values.notes || ''} onChange={set('notes')} placeholder={t('Relationship notes, hiring patterns…')} />
@@ -86,6 +90,9 @@ export default function Clients() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
   const [portalFor, setPortalFor] = useState(null);
+  const { billing } = useBilling();
+  const [signFor, setSignFor] = useState(null);
+  const [office, setOffice] = useState('');
 
   function load() {
     api.clients().then(setRows);
@@ -110,7 +117,7 @@ export default function Clients() {
       initial: {
         id: row.id, company_name: row.company_name, industry: row.industry, contact_name: row.contact_name,
         contact_email: row.contact_email, contact_phone: row.contact_phone, address: row.address,
-        owner_user_id: row.owner_user_id, status: row.status, notes: row.notes || '',
+        owner_user_id: row.owner_user_id, status: row.status, notes: row.notes || '', office_id: row.office_id ?? '',
       },
     });
   }
@@ -164,10 +171,11 @@ export default function Clients() {
     { key: 'owner_name', header: t('Owner'), render: (r) => <Avatar name={r.owner_name} color={r.owner_color} size={24} /> },
     { key: 'status', header: t('Status'), render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
     {
-      key: 'actions', header: '', className: 'w-28',
+      key: 'actions', header: '', className: 'w-36',
       render: (r) => (
         <div className="flex items-center justify-end gap-0.5">
           <IconButton icon="arrowUpRight" title={t('Client portal')} onClick={() => setPortalFor(r)} />
+          {billing?.features?.signatures === true && <IconButton icon="fileText" title={t('Signatures')} onClick={() => setSignFor(r)} />}
           <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
         </div>
       ),
@@ -180,6 +188,7 @@ export default function Clients() {
       count={rows.length}
       actions={
         <>
+          <OfficeFilter value={office} onChange={setOffice} />
           <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> {t('Export')}</Button>
           <PhotoImportButton
             kind="clients" title={t('Import clients from a photo')} onImported={load}
@@ -203,7 +212,7 @@ export default function Clients() {
       }
     >
       <Card>
-        <Table cols={cols} rows={rows} />
+        <Table cols={cols} rows={office ? rows.filter((r) => String(r.office_id) === office) : rows} />
       </Card>
 
       {modal && (
@@ -217,6 +226,7 @@ export default function Clients() {
         />
       )}
 
+      {signFor && <DocsSignaturesModal kind="client" record={signFor} name={signFor.company_name} onClose={() => setSignFor(null)} />}
       {portalFor && <ClientPortalModal client={portalFor} onClose={() => setPortalFor(null)} onChanged={load} />}
 
       {deleteRow && (

@@ -90,6 +90,22 @@ export default function Reports() {
         </Card>
       </div>
 
+      {data.byOffice && data.byOffice.some((o) => o.office_id) && (
+        <Card className="p-1 mb-6" data-testid="by-office">
+          <CardHead title={t('Results by office')} sub={t('Placements, fees and amount billed per office (by the job\'s office)')} />
+          <div className="divide-y divide-lineSoft">
+            {data.byOffice.map((o) => (
+              <div key={o.office_id || 0} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3">
+                <span className="font-medium text-ink flex-1 min-w-[8rem]">{o.office_name || t('No office')}</span>
+                <span className="text-sm text-muted">{o.placement_count === 1 ? t('1 placement') : t('{n} placements', { n: o.placement_count })}</span>
+                <span className="text-sm text-muted">{t('Fees')}: {money(o.total_fees, true)}</span>
+                <span className="text-sm font-medium text-ink">{t('Billed')}: {money(o.billed, true)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-1">
           <CardHead

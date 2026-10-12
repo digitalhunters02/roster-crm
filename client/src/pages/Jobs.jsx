@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
+import { useBilling } from '../billing/useBilling.js';
 import api from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
-  Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog,
+  Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog, IconButton,
   Field, TextInput, TextArea, SelectInput, FormGrid, FormError, RowActions,
 } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import { shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
+import JobSuggestionsModal from '../components/JobSuggestionsModal.jsx';
+import AiWriteButton from '../components/AiWriteButton.jsx';
+import OfficeField, { OfficeFilter } from '../offices/OfficeField.jsx';
 
 import { useT } from '../auth/i18n.js';
 const STATUS_TONE = { Open: 'green', 'On Hold': 'amber', Filled: 'blue', Cancelled: 'neutral' };
@@ -16,7 +20,7 @@ const TYPE_OPTIONS = ['Contract', 'Permanent', 'Contract-to-Hire'];
 
 const EMPTY = {
   client_id: '', title: '', employment_type: 'Permanent', pay_range: '', location: '',
-  status: 'Open', owner_user_id: '', opened_date: '', notes: '',
+  status: 'Open', owner_user_id: '', opened_date: '', notes: '', office_id: '',
 };
 
 function JobForm({ initial, clients, users, onCancel, onSubmit, saving, error }) {
@@ -72,8 +76,12 @@ function JobForm({ initial, clients, users, onCancel, onSubmit, saving, error })
         <Field label={t('Opened date')}>
           <TextInput type="date" value={values.opened_date} onChange={set('opened_date')} />
         </Field>
+        <OfficeField value={values.office_id} onChange={set('office_id')} />
       </FormGrid>
       <Field label={t('Notes')}>
+        <AiWriteButton label={t('Write job description with AI')} testId="ai-job" disabled={!values.title?.trim()}
+          run={() => api.aiJobDescription({ fields: { ...values, client_industry: '' } })}
+          onText={(text) => setValues((v) => ({ ...v, notes: text }))} />
         <TextArea value={values.notes || ''} onChange={set('notes')} placeholder={t('Intake notes, must-haves, client quirks…')} />
       </Field>
     </Modal>
@@ -91,6 +99,10 @@ export default function Jobs() {
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+
+  const { billing } = useBilling();
+  const [suggestFor, setSuggestFor] = useState(null);
+  const [office, setOffice] = useState('');
 
   function load() {
     api.jobs().then(setRows);
@@ -116,7 +128,7 @@ export default function Jobs() {
       initial: {
         id: row.id, client_id: row.client_id, title: row.title, employment_type: row.employment_type,
         pay_range: row.pay_range, location: row.location, status: row.status, owner_user_id: row.owner_user_id,
-        opened_date: row.opened_date, notes: row.notes || '',
+        opened_date: row.opened_date, notes: row.notes || '', office_id: row.office_id ?? '',
       },
     });
   }
@@ -171,8 +183,13 @@ export default function Jobs() {
     { key: 'owner_name', header: t('Owner'), render: (r) => <span className="text-sm text-muted">{r.owner_name}</span> },
     { key: 'status', header: t('Status'), render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
     {
-      key: 'actions', header: '', className: 'w-20',
-      render: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />,
+      key: 'actions', header: '', className: 'w-28',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-0.5">
+          {billing?.features?.ai === true && <IconButton icon="star" title={t('Suggested candidates')} onClick={() => setSuggestFor(r)} />}
+          <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
+        </div>
+      ),
     },
   ];
 
@@ -182,13 +199,14 @@ export default function Jobs() {
       count={rows.length}
       actions={
         <>
+          <OfficeFilter value={office} onChange={setOffice} />
           <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> {t('Export')}</Button>
           <Button onClick={openCreate}><Icon name="plus" size={15} /> {t('New Job')}</Button>
         </>
       }
     >
       <Card>
-        <Table cols={cols} rows={rows} />
+        <Table cols={cols} rows={office ? rows.filter((r) => String(r.office_id) === office) : rows} />
       </Card>
 
       {modal && (
@@ -202,6 +220,8 @@ export default function Jobs() {
           error={formError}
         />
       )}
+
+      {suggestFor && <JobSuggestionsModal job={suggestFor} onClose={() => setSuggestFor(null)} />}
 
       {deleteRow && (
         <ConfirmDialog

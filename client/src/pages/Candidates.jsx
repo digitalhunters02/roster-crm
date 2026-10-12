@@ -7,18 +7,22 @@ import {
 } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
 import MessagesModal from '../components/MessagesModal.jsx';
+import DocsSignaturesModal from '../components/DocsSignaturesModal.jsx';
+import AiWriteButton from '../components/AiWriteButton.jsx';
+import OfficeField, { OfficeFilter } from '../offices/OfficeField.jsx';
 import { shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
 import PhotoImportButton from '../components/PhotoImportButton.jsx';
 
 import { useT } from '../auth/i18n.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { useBilling } from '../billing/useBilling.js';
 const SOURCE_TONE = { LinkedIn: 'blue', Referral: 'green', 'Job Board': 'amber', Sourced: 'brand' };
 const SOURCE_OPTIONS = ['LinkedIn', 'Referral', 'Job Board', 'Sourced'];
 
 const EMPTY = {
   name: '', email: '', phone: '', current_title: '', current_employer: '', skills: '',
-  resume_summary: '', source: 'LinkedIn', owner_user_id: '',
+  resume_summary: '', source: 'LinkedIn', owner_user_id: '', office_id: '',
 };
 
 function CandidateForm({ initial, users, onCancel, onSubmit, saving, error }) {
@@ -109,8 +113,12 @@ function CandidateForm({ initial, users, onCancel, onSubmit, saving, error }) {
             {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </SelectInput>
         </Field>
+        <OfficeField value={values.office_id} onChange={set('office_id')} />
       </FormGrid>
       <Field label={t('Resume summary')}>
+        <AiWriteButton label={t('Write profile with AI')} testId="ai-summary" disabled={!values.name?.trim()}
+          run={() => api.aiCandidateSummary({ fields: values })}
+          onText={(text) => setValues((v) => ({ ...v, resume_summary: text }))} />
         <TextArea value={values.resume_summary || ''} onChange={set('resume_summary')} placeholder={t('Short summary of experience and fit…')} />
       </Field>
     </Modal>
@@ -127,7 +135,10 @@ export default function Candidates() {
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const { billing } = useBilling();
   const [messagesFor, setMessagesFor] = useState(null);
+  const [docsFor, setDocsFor] = useState(null);
+  const [office, setOffice] = useState('');
 
   function load() {
     api.candidates().then(setRows);
@@ -152,7 +163,7 @@ export default function Candidates() {
       initial: {
         id: row.id, name: row.name, email: row.email, phone: row.phone, current_title: row.current_title,
         current_employer: row.current_employer, skills: row.skills, resume_summary: row.resume_summary || '',
-        source: row.source, owner_user_id: row.owner_user_id,
+        source: row.source, owner_user_id: row.owner_user_id, office_id: row.office_id ?? '',
       },
     });
   }
@@ -206,10 +217,11 @@ export default function Candidates() {
     { key: 'submission_count', header: t('Submissions'), render: (r) => r.submission_count },
     { key: 'created_at', header: t('Added'), render: (r) => shortDate(r.created_at) },
     {
-      key: 'actions', header: '', className: 'w-28',
+      key: 'actions', header: '', className: 'w-36',
       render: (r) => (
         <div className="flex items-center justify-end gap-0.5">
           <IconButton icon="mail" title={t('Messages')} onClick={() => setMessagesFor(r)} />
+          {billing?.features?.documents === true && <IconButton icon="fileText" title={t('Documents & signatures')} onClick={() => setDocsFor(r)} />}
           <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
         </div>
       ),
@@ -222,6 +234,7 @@ export default function Candidates() {
       count={rows.length}
       actions={
         <>
+          <OfficeFilter value={office} onChange={setOffice} />
           <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> {t('Export')}</Button>
           <PhotoImportButton
             kind="clients" title={t('Import candidates from a photo')} onImported={load}
@@ -245,7 +258,7 @@ export default function Candidates() {
       }
     >
       <Card>
-        <Table cols={cols} rows={rows} />
+        <Table cols={cols} rows={office ? rows.filter((r) => String(r.office_id) === office) : rows} />
       </Card>
 
       {modal && (
@@ -259,6 +272,7 @@ export default function Candidates() {
         />
       )}
 
+      {docsFor && <DocsSignaturesModal kind="candidate" record={docsFor} name={docsFor.name} onClose={() => setDocsFor(null)} />}
       {messagesFor && <MessagesModal candidate={messagesFor} onClose={() => setMessagesFor(null)} />}
 
       {deleteRow && (

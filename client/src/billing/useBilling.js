@@ -25,5 +25,5 @@ export function useBilling() {
 }
 
 // Lowest plan label for a locked area (matches FEATURE_MIN_PLAN on the server).
-export const FEATURE_PLAN = { timesheets: 'essencial', whatsapp: 'essencial', portal: 'essencial', messaging: 'essencial', ai: 'completo' };
+export const FEATURE_PLAN = { timesheets: 'essencial', whatsapp: 'essencial', portal: 'essencial', messaging: 'essencial', ai: 'completo', signatures: 'completo', documents: 'completo', payroll: 'completo', api: 'completo', offices: 'completo' };
 export const PLAN_NAMES = { basico: 'Basic', essencial: 'Essential', completo: 'Complete' };

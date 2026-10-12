@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import api from '../api.js';
+import api, { downloadAuthed } from '../api.js';
+import { useBilling } from '../billing/useBilling.js';
 import Layout from '../components/Layout.jsx';
 import {
   Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog, IconButton, Kpi,
@@ -16,6 +17,31 @@ const STATUS_TONE = { Draft: 'neutral', Sent: 'blue', Paid: 'green', Overdue: 'r
 const STATUS_OPTIONS = ['Draft', 'Sent', 'Paid', 'Overdue'];
 
 const EMPTY = { placement_id: '', period_start: '', period_end: '', hours: '', amount: '', status: 'Draft' };
+
+// Hours and gross pay (hours x pay rate) as a CSV for the payroll provider. Numbers only: Roster does not compute taxes.
+function PayrollExport({ onClose }) {
+  const { t } = useT();
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    setBusy(true); setError(null);
+    try { await downloadAuthed(`/timesheets/payroll-export?${new URLSearchParams({ ...(from && { from }), ...(to && { to }) })}`, 'roster-payroll-hours.csv'); onClose(); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal title={t('Payroll hours export')} sub={t('One row per timesheet: worker, hours, pay rate and gross pay (hours x rate).')} onClose={onClose}
+      footer={<><Button variant="outline" onClick={onClose} disabled={busy}>{t('Cancel')}</Button><Button onClick={go} disabled={busy} data-testid="payroll-download">{busy ? t('Preparing…') : t('Download CSV')}</Button></>}>
+      <FormError error={error} />
+      <FormGrid>
+        <Field label={t('Periods ending from')}><TextInput type="date" value={from} onChange={(e) => setFrom(e.target.value)} data-testid="payroll-from" /></Field>
+        <Field label={t('to')}><TextInput type="date" value={to} onChange={(e) => setTo(e.target.value)} /></Field>
+      </FormGrid>
+      <p className="text-xs text-faint mt-1">{t('Drafts are left out. Roster only lists the numbers you entered: it does not calculate taxes, withholdings or overtime rules.')}</p>
+    </Modal>
+  );
+}
 
 function TimesheetForm({ initial, placements, onCancel, onSubmit, saving, error }) {
   const { t } = useT();
@@ -80,6 +106,8 @@ function TimesheetsInner() {
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const { billing } = useBilling();
+  const [payrollOpen, setPayrollOpen] = useState(false);
   const [invoiceFor, setInvoiceFor] = useState(null);
   const [sendRow, setSendRow] = useState(null);
   const [sendBusy, setSendBusy] = useState(false);
@@ -204,6 +232,7 @@ function TimesheetsInner() {
       count={rows.length}
       actions={
         <>
+          {billing?.features?.payroll === true && <Button variant="outline" onClick={() => setPayrollOpen(true)} data-testid="payroll-open"><Icon name="download" size={15} /> {t('Payroll hours')}</Button>}
           <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> {t('Export')}</Button>
           <Button onClick={openCreate}><Icon name="plus" size={15} /> {t('New Timesheet')}</Button>
         </>
@@ -230,6 +259,7 @@ function TimesheetsInner() {
         />
       )}
 
+      {payrollOpen && <PayrollExport onClose={() => setPayrollOpen(false)} />}
       {invoiceFor && <InvoiceView load={() => api.timesheetInvoice(invoiceFor.id)} onClose={() => setInvoiceFor(null)} />}
 
       {sendRow && (

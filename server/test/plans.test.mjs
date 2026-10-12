@@ -308,7 +308,7 @@ test('automations really run: a stage change, a finished interview and the daily
 
   // 4) a new rule from the catalog, paused and deleted; the catalog lists the triggers
   const cat = (await s.call('GET', '/api/automations/catalog', { token: T })).json;
-  assert.deepEqual(cat.map((c) => c.id).sort(), ['candidate_referral', 'interview_completed', 'job_open_30d', 'submission_submitted', 'timesheet_overdue']);
+  assert.deepEqual(cat.map((c) => c.id).sort(), ['candidate_referral', 'document_expiring', 'interview_completed', 'job_open_30d', 'submission_submitted', 'timesheet_overdue']);
   const created = await s.call('POST', '/api/automations', { token: T, body: { name: 'Ping me on referrals', trigger_type: 'candidate_referral' } });
   assert.equal(created.status, 201);
   const ref = await s.call('POST', '/api/candidates', { token: T, body: { name: 'Referred Rita', source: 'Referral' } });

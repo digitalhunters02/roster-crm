@@ -68,7 +68,52 @@ export const portalApi = {
   invoice: (token, id) => portalGet(`${encodeURIComponent(token)}/invoices/${id}`),
 };
 
+// Downloads a file from an authenticated GET (CSV export) as a Blob.
+export async function downloadAuthed(path, filename) {
+  const r = await fetch(BASE + path, { headers: authHeaders() });
+  if (r.status === 401) handleUnauthorized();
+  if (!r.ok) { const d = await r.json().catch(() => null); throw Object.assign(new Error(d?.error || `Request failed (${r.status})`), { status: r.status, code: d?.code }); }
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+async function upload(path, form) {
+  const r = await fetch(BASE + path, { method: 'POST', headers: authHeaders(), body: form });
+  return handle(r);
+}
+
 export const api = {
+  // ---- Etapa 3: plano Completo ----
+  aiStatus: () => get('/ai/status'),
+  aiCandidateSummary: (body) => post('/ai/candidate-summary', body),
+  aiJobDescription: (body) => post('/ai/job-description', body),
+  jobSuggestions: (id) => get(`/jobs/${id}/suggestions`),
+  documentMeta: () => get('/documents/meta'),
+  candidateDocuments: (id) => get(`/candidates/${id}/documents`),
+  createDocument: (id, body) => post(`/candidates/${id}/documents`, body),
+  updateDocument: (id, body) => put(`/documents/${id}`, body),
+  deleteDocument: (id) => del(`/documents/${id}`),
+  signatureStatus: () => get('/signatures/status'),
+  signatures: (kind, id) => get(`/signatures?kind=${kind}&related_id=${id}`),
+  signatureDefaults: (kind, id) => get(`/signatures/defaults?kind=${kind}&related_id=${id}`),
+  sendSignature: (form) => upload('/signatures', form),
+  refreshSignature: (id) => post(`/signatures/${id}/refresh`, {}),
+  deleteSignature: (id) => del(`/signatures/${id}`),
+  offices: () => get('/offices'),
+  createOffice: (body) => post('/offices', body),
+  updateOffice: (id, body) => put(`/offices/${id}`, body),
+  deleteOffice: (id) => del(`/offices/${id}`),
+  setUserOffice: (id, office_id) => put(`/users/${id}/office`, { office_id }),
+  apiKeys: () => get('/api-keys'),
+  createApiKey: (name) => post('/api-keys', { name }),
+  deleteApiKey: (id) => del(`/api-keys/${id}`),
+  webhooks: () => get('/webhooks'),
+  webhookEvents: () => get('/webhooks/events'),
+  createWebhook: (body) => post('/webhooks', body),
+  setWebhookActive: (id, active) => patch(`/webhooks/${id}`, { active }),
+  deleteWebhook: (id) => del(`/webhooks/${id}`),
+  testWebhook: (id) => post(`/webhooks/${id}/test`, {}),
+  webhookDeliveries: (id) => get(`/webhooks/${id}/deliveries`),
   // ---- Etapa 2: portal do cliente, fatura, mensagens ----
   clientPortal: (id) => get(`/clients/${id}/portal`),
   clientPortalAction: (id, action) => post(`/clients/${id}/portal/${action}`, {}),

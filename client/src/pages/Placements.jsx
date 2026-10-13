@@ -9,6 +9,7 @@ import Icon from '../components/Icon.jsx';
 import { money, shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
 
+import { useT } from '../auth/i18n.js';
 const STATUS_TONE = { Active: 'green', Completed: 'blue', 'Ended Early': 'rose' };
 const STATUS_OPTIONS = ['Active', 'Completed', 'Ended Early'];
 
@@ -18,6 +19,7 @@ const EMPTY = {
 };
 
 function PlacementForm({ initial, submissions, onCancel, onSubmit, saving, error }) {
+  const { t } = useT();
   const [values, setValues] = useState(initial);
   const set = (k) => (e) => setValues((v) => ({ ...v, [k]: e.target.value }));
 
@@ -34,42 +36,42 @@ function PlacementForm({ initial, submissions, onCancel, onSubmit, saving, error
 
   return (
     <Modal
-      title={initial.id ? 'Edit Placement' : 'New Placement'}
+      title={initial.id ? t('Edit Placement') : t('New Placement')}
       onClose={onCancel}
       wide
       footer={
         <>
-          <Button variant="outline" onClick={onCancel} disabled={saving}>Cancel</Button>
-          <Button onClick={() => onSubmit(values)} disabled={saving}>{saving ? 'Saving…' : 'Save Placement'}</Button>
+          <Button variant="outline" onClick={onCancel} disabled={saving}>{t('Cancel')}</Button>
+          <Button onClick={() => onSubmit(values)} disabled={saving}>{saving ? t('Saving…') : t('Save Placement')}</Button>
         </>
       }
     >
       <FormError error={error} />
       <FormGrid>
-        <Field label="Submission" required hint="Candidate × job being placed">
+        <Field label={t('Submission')} required hint={t('Candidate × job being placed')}>
           <SelectInput value={values.submission_id} onChange={onSubmissionChange}>
-            <option value="">Select submission…</option>
+            <option value="">{t('Select submission…')}</option>
             {submissions.map((s) => <option key={s.id} value={s.id}>{s.candidate_name} — {s.job_title} ({s.client_name})</option>)}
           </SelectInput>
         </Field>
-        <Field label="Status" required>
+        <Field label={t('Status')} required>
           <SelectInput value={values.status} onChange={set('status')}>
-            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{t(s)}</option>)}
           </SelectInput>
         </Field>
-        <Field label="Start date" required>
+        <Field label={t('Start date')} required>
           <TextInput type="date" value={values.start_date} onChange={set('start_date')} />
         </Field>
-        <Field label="End date" hint="Leave blank for permanent / ongoing">
+        <Field label={t('End date')} hint={t('Leave blank for permanent / ongoing')}>
           <TextInput type="date" value={values.end_date || ''} onChange={set('end_date')} />
         </Field>
-        <Field label="Pay rate" required hint="Hourly rate, or annual salary for permanent">
+        <Field label={t('Pay rate')} required hint={t('Hourly rate, or annual salary for permanent')}>
           <TextInput type="number" min="0" step="0.01" value={values.pay_rate} onChange={set('pay_rate')} placeholder="140000" />
         </Field>
-        <Field label="Bill rate" required hint="Hourly rate billed to client (0 for permanent)">
+        <Field label={t('Bill rate')} required hint={t('Hourly rate billed to client (0 for permanent)')}>
           <TextInput type="number" min="0" step="0.01" value={values.bill_rate} onChange={set('bill_rate')} placeholder="95" />
         </Field>
-        <Field label="Placement fee" required>
+        <Field label={t('Placement fee')} required>
           <TextInput type="number" min="0" step="0.01" value={values.placement_fee} onChange={set('placement_fee')} placeholder="28000" />
         </Field>
       </FormGrid>
@@ -78,6 +80,7 @@ function PlacementForm({ initial, submissions, onCancel, onSubmit, saving, error
 }
 
 export default function Placements() {
+  const { t } = useT();
   const [rows, setRows] = useState(null);
   const [submissions, setSubmissions] = useState([]);
   const [modal, setModal] = useState(null);
@@ -96,7 +99,7 @@ export default function Placements() {
     api.submissions().then(setSubmissions);
   }, []);
 
-  if (!rows) return <Layout title="Placements"><Spinner /></Layout>;
+  if (!rows) return <Layout title={t('Placements')}><Spinner /></Layout>;
 
   function openCreate() {
     setFormError(null);
@@ -151,18 +154,18 @@ export default function Placements() {
   function handleExport() {
     downloadCsv(
       'roster-placements.csv',
-      ['Candidate', 'Client', 'Job', 'Start', 'End', 'Pay Rate', 'Bill Rate', 'Fee', 'Status'],
+      [t('Candidate'), t('Client'), t('Job'), t('Start'), t('End'), t('Pay Rate'), t('Bill Rate'), t('Fee'), t('Status')],
       rows.map((r) => [r.candidate_name, r.client_name, r.job_title, r.start_date, r.end_date || '', r.pay_rate, r.bill_rate, r.placement_fee, r.status])
     );
   }
 
   const cols = [
-    { key: 'candidate_name', header: 'Candidate', render: (r) => <CellName primary={r.candidate_name} secondary={`${r.job_title} · ${r.client_name}`} /> },
-    { key: 'start_date', header: 'Start', render: (r) => shortDate(r.start_date) },
-    { key: 'end_date', header: 'End', render: (r) => (r.end_date ? shortDate(r.end_date) : '—') },
-    { key: 'pay_rate', header: 'Pay Rate', render: (r) => (r.job_employment_type === 'Permanent' ? money(r.pay_rate, true) : `$${r.pay_rate}/hr`) },
-    { key: 'placement_fee', header: 'Fee', render: (r) => <span className="font-medium">{money(r.placement_fee)}</span> },
-    { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
+    { key: 'candidate_name', header: t('Candidate'), render: (r) => <CellName primary={r.candidate_name} secondary={`${r.job_title} · ${r.client_name}`} /> },
+    { key: 'start_date', header: t('Start'), render: (r) => shortDate(r.start_date) },
+    { key: 'end_date', header: t('End'), render: (r) => (r.end_date ? shortDate(r.end_date) : '—') },
+    { key: 'pay_rate', header: t('Pay Rate'), render: (r) => (r.job_employment_type === 'Permanent' ? money(r.pay_rate, true) : `$${r.pay_rate}/hr`) },
+    { key: 'placement_fee', header: t('Fee'), render: (r) => <span className="font-medium">{money(r.placement_fee)}</span> },
+    { key: 'status', header: t('Status'), render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
     {
       key: 'actions', header: '', className: 'w-20',
       render: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />,
@@ -171,12 +174,12 @@ export default function Placements() {
 
   return (
     <Layout
-      title="Placements"
+      title={t('Placements')}
       count={rows.length}
       actions={
         <>
-          <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> Export</Button>
-          <Button onClick={openCreate}><Icon name="plus" size={15} /> New Placement</Button>
+          <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> {t('Export')}</Button>
+          <Button onClick={openCreate}><Icon name="plus" size={15} /> {t('New Placement')}</Button>
         </>
       }
     >
@@ -197,8 +200,8 @@ export default function Placements() {
 
       {deleteRow && (
         <ConfirmDialog
-          title="Delete placement?"
-          message={`This will permanently remove the placement for ${deleteRow.candidate_name}.`}
+          title={t('Delete placement?')}
+          message={t('This will permanently remove the placement for {name}.', { name: deleteRow.candidate_name })}
           error={deleteError}
           busy={deleteBusy}
           onCancel={() => setDeleteRow(null)}

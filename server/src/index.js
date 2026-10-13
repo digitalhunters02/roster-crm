@@ -2,12 +2,26 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { get, all, run, initSchema } from './db.js';
+import pool, { get, all, run, initSchema } from './db.js';
 import crypto from 'node:crypto';
 import * as whatsapp from './whatsapp.js';
-import { requireAuth, requireOwner, bootstrapOwner } from './auth.js';
-import { publicAuthRoutes, accountRoutes } from './authRoutes.js';
+import { requireAuth, requireOwner, blockDemo, bootstrapOwner, backfillRecruiters } from './auth.js';
+import { publicAuthRoutes, accountRoutes, demoTrialRoute } from './authRoutes.js';
 import { mountAdminSummary } from './adminSummary.js';
+import { publicBillingRoutes, billingRoutes, billingStatus } from './billingRoutes.js';
+import { effectivePlan, getSubscription, requirePlan, enforceLimit, getAdminSummary } from './billing.js';
+import * as automationEngine from './automationEngine.js';
+import { startDemoTrialScheduler } from './demoTrial.js';
+import { rollSampleDates } from './sampleData.js';
+import { parseResumeText } from './resumeParse.js';
+import { createPhotoImportRouter, initPhotoImportSchema, startPhotoBilling } from './photoImportRouter.js';
+import { sendNoticeEmail, sendEmail, isMailConfigured } from './mailer.js';
+import { PROFILE_FIELDS, profileLimit, readProfile, isHttpUrl } from './profile.js';
+import { mountPortalPublic, mountPortalStaff, buildInvoice, invoiceNumber } from './portal.js';
+import { mountMessaging, mountSmsWebhook } from './messaging.js';
+import { mountSignatures, startSignaturePoller } from './signatures.js';
+import { mountTools } from './tools.js';
+import { mountPublicApi, mountIntegrationsAdmin, emit as emitWebhook } from './integrations.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
@@ -41,9 +55,17 @@ app.get('/api/health', ar(async (_req, res) => {
 }));
 
 publicAuthRoutes(app, ar);
+demoTrialRoute(app, ar);
+publicBillingRoutes(app, ar);
+
+// Client portal (private link, no login) and the SMS reply webhook Twilio calls. Both guard themselves (token / signature).
+mountPortalPublic(app, ar);
+mountSmsWebhook(app, ar);
+// Public API with API keys (Complete plan): the key is the login.
+mountPublicApi(app, ar);
 
 // Machine-to-machine: Harbor reads this with X-Admin-Key (see adminSummary.js).
-mountAdminSummary(app, ar, get);
+mountAdminSummary(app, ar, get, getAdminSummary);
 
 // -------------------- WhatsApp webhook (public) --------------------
 // Meta calls these directly (webhook verification handshake, then message
@@ -72,7 +94,55 @@ app.post('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
 
 // ==================== everything below requires a login ====================
 app.use('/api', requireAuth);
+
+// "Importar de foto" (AI reads a photo/print, the person reviews before saving) + extra use by credits.
+app.use('/api/photo-import', blockDemo);
+app.use('/api/photo-import', createPhotoImportRouter({
+  pool, requireAuth, requireAdmin: requireOwner, effectivePlan, getSubscription,
+  planLimits: { basico: 0, essencial: 100, completo: 500 },
+  kindsOpts: { contactTypes: ['business'], disableKinds: ['leads', 'expense'], clientsPage: 'clients' },
+  adminWhere: "role = 'owner'", isAdmin: (a) => a?.role === 'owner',
+  appName: 'Roster', sendNotice: sendNoticeEmail,
+}));
+billingRoutes(app, ar);
+
+// ---------- plan gates and limits (see billing.js: PLAN_LIMITS / FEATURE_MIN_PLAN) ----------
+// Timesheets & invoices and the WhatsApp inbox start at the Essential plan; the Basic plan has limits on
+// users, candidates, open jobs and active automations. Without Stripe (or on Impact Digital's own demo) nothing is locked.
+app.use('/api/timesheets', requirePlan('essencial'));
+app.use(['/api/integrations/whatsapp/connect', '/api/integrations/whatsapp/conversations'], requirePlan('essencial'));
+app.post('/api/integrations/whatsapp/send', blockDemo, requirePlan('essencial'));
+app.use(['/api/message-templates', '/api/integrations/sms/connect', '/api/integrations/sms/disconnect'], requirePlan('essencial'));
+app.use('/api/candidates/:id/messages', requirePlan('essencial'));
+const countOf = (sql) => async () => Number((await get(sql)).n) || 0;
+app.post('/api/accounts', enforceLimit('users', countOf(`SELECT COUNT(*) AS n FROM accounts WHERE is_demo_trial = FALSE`)));
+app.post('/api/candidates', enforceLimit('candidates', countOf(`SELECT COUNT(*) AS n FROM candidates`)));
+const openJobsLimit = enforceLimit('openJobs', countOf(`SELECT COUNT(*) AS n FROM jobs WHERE status = 'Open'`));
+app.post('/api/jobs', (req, res, next) => ((req.body?.status ?? 'Open') === 'Open' ? openJobsLimit(req, res, next) : next()));
+const automationsLimit = enforceLimit('automations', countOf(`SELECT COUNT(*) AS n FROM automations WHERE active = 1`));
+app.post('/api/automations', (req, res, next) => (req.body?.active === false ? next() : automationsLimit(req, res, next)));
+app.patch('/api/automations/:id/active', (req, res, next) => (req.body?.active ? automationsLimit(req, res, next) : next()));
 accountRoutes(app, ar);
+
+// -------------------- agency profile (name, contact, logo): stored on the server, one per installation --------------------
+app.get('/api/company-profile', ar(async (_req, res) => res.json(await readProfile())));
+app.put('/api/company-profile', requireOwner, ar(async (req, res) => {
+  const b = req.body || {};
+  const cur = await readProfile();
+  const next = { ...cur };
+  for (const f of PROFILE_FIELDS) if (typeof b[f] === 'string') next[f] = b[f].trim().slice(0, profileLimit(f));
+  if (next.payment_url && !isHttpUrl(next.payment_url)) {
+    return res.status(400).json({ error: 'The payment link must start with https://', code: 'invalid_payment_url' });
+  }
+  if (typeof b.logo === 'string') {
+    if (b.logo !== '' && !(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.logo) && b.logo.length <= 400_000)) {
+      return res.status(400).json({ error: 'The logo must be a PNG, JPEG or WebP image under 300 KB.', code: 'invalid_logo' });
+    }
+    next.logo = b.logo;
+  }
+  await run(`INSERT INTO app_meta (key, value) VALUES ('company_profile', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(next)]);
+  res.json(next);
+}));
 
 // -------------------- helpers --------------------
 function missingField(body, fields) {
@@ -89,6 +159,14 @@ async function rowExists(table, id) {
 
 async function countWhere(table, column, id) {
   return (await get(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`, id)).n;
+}
+
+// Optional office on clients, jobs and candidates (Complete plan creates the offices). Absent = keep what is there.
+async function officeFrom(body, current) {
+  if (body?.office_id === undefined) return { value: current ?? null };
+  if (body.office_id === null || body.office_id === '') return { value: null };
+  if (!(await rowExists('offices', body.office_id))) return { error: 'office_id does not reference a real office' };
+  return { value: Number(body.office_id) };
 }
 
 // -------------------- users (read-only; Team card on Settings) --------------------
@@ -113,16 +191,18 @@ app.get('/api/clients', ar(async (req, res) => {
 }));
 
 app.post('/api/clients', ar(async (req, res) => {
-  const b = req.body || {};
-  const missing = missingField(b, ['company_name', 'industry', 'contact_name', 'contact_email', 'contact_phone', 'address', 'owner_user_id', 'status']);
+  const b = { ...(req.body || {}), industry: req.body?.industry || '', contact_name: req.body?.contact_name || '', contact_email: req.body?.contact_email || '', contact_phone: req.body?.contact_phone || '', address: req.body?.address || '', status: req.body?.status || 'Active', owner_user_id: req.body?.owner_user_id || req.account?.user_id || null };
+  const missing = missingField(b, ['company_name', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, null);
+  if (office.error) return res.status(400).json({ error: office.error });
   const info = await run(`
-    INSERT INTO clients (company_name, industry, contact_name, contact_email, contact_phone, address, owner_user_id, status, notes)
-    VALUES (@company_name, @industry, @contact_name, @contact_email, @contact_phone, @address, @owner_user_id, @status, @notes) RETURNING id
+    INSERT INTO clients (company_name, industry, contact_name, contact_email, contact_phone, address, owner_user_id, status, notes, office_id)
+    VALUES (@company_name, @industry, @contact_name, @contact_email, @contact_phone, @address, @owner_user_id, @status, @notes, @office_id) RETURNING id
   `, {
-    company_name: b.company_name, industry: b.industry, contact_name: b.contact_name, contact_email: b.contact_email,
+    office_id: office.value, company_name: b.company_name, industry: b.industry, contact_name: b.contact_name, contact_email: b.contact_email,
     contact_phone: b.contact_phone, address: b.address, owner_user_id: b.owner_user_id, status: b.status, notes: b.notes || null,
   });
   res.status(201).json(await clientRow(info.rows[0].id));
@@ -131,17 +211,19 @@ app.post('/api/clients', ar(async (req, res) => {
 app.put('/api/clients/:id', ar(async (req, res) => {
   const existing = await clientRow(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
-  const b = req.body || {};
-  const missing = missingField(b, ['company_name', 'industry', 'contact_name', 'contact_email', 'contact_phone', 'address', 'owner_user_id', 'status']);
+  const b = { ...(req.body || {}), industry: req.body?.industry || '', contact_name: req.body?.contact_name || '', contact_email: req.body?.contact_email || '', contact_phone: req.body?.contact_phone || '', address: req.body?.address || '', status: req.body?.status || 'Active', owner_user_id: req.body?.owner_user_id || req.account?.user_id || null };
+  const missing = missingField(b, ['company_name', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, existing.office_id);
+  if (office.error) return res.status(400).json({ error: office.error });
   await run(`
     UPDATE clients SET company_name = @company_name, industry = @industry, contact_name = @contact_name, contact_email = @contact_email,
-      contact_phone = @contact_phone, address = @address, owner_user_id = @owner_user_id, status = @status, notes = @notes
+      contact_phone = @contact_phone, address = @address, owner_user_id = @owner_user_id, status = @status, notes = @notes, office_id = @office_id
     WHERE id = @id
   `, {
-    id: req.params.id, company_name: b.company_name, industry: b.industry, contact_name: b.contact_name, contact_email: b.contact_email,
+    office_id: office.value, id: req.params.id, company_name: b.company_name, industry: b.industry, contact_name: b.contact_name, contact_email: b.contact_email,
     contact_phone: b.contact_phone, address: b.address, owner_user_id: b.owner_user_id, status: b.status, notes: b.notes || null,
   });
   res.json(await clientRow(req.params.id));
@@ -180,17 +262,19 @@ app.get('/api/jobs', ar(async (req, res) => {
 }));
 
 app.post('/api/jobs', ar(async (req, res) => {
-  const b = req.body || {};
-  const missing = missingField(b, ['client_id', 'title', 'employment_type', 'pay_range', 'location', 'status', 'owner_user_id', 'opened_date']);
+  const b = { ...(req.body || {}), employment_type: req.body?.employment_type || 'Contract', pay_range: req.body?.pay_range || '', location: req.body?.location || '', status: req.body?.status || 'Open', owner_user_id: req.body?.owner_user_id || req.account?.user_id || null, opened_date: req.body?.opened_date || new Date().toISOString().slice(0, 10) };
+  const missing = missingField(b, ['client_id', 'title', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('clients', b.client_id))) return res.status(400).json({ error: 'client_id does not reference a real client' });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, null);
+  if (office.error) return res.status(400).json({ error: office.error });
   const info = await run(`
-    INSERT INTO jobs (client_id, title, employment_type, pay_range, location, status, owner_user_id, opened_date, notes)
-    VALUES (@client_id, @title, @employment_type, @pay_range, @location, @status, @owner_user_id, @opened_date, @notes) RETURNING id
+    INSERT INTO jobs (client_id, title, employment_type, pay_range, location, status, owner_user_id, opened_date, notes, office_id)
+    VALUES (@client_id, @title, @employment_type, @pay_range, @location, @status, @owner_user_id, @opened_date, @notes, @office_id) RETURNING id
   `, {
-    client_id: b.client_id, title: b.title, employment_type: b.employment_type, pay_range: b.pay_range, location: b.location,
+    office_id: office.value, client_id: b.client_id, title: b.title, employment_type: b.employment_type, pay_range: b.pay_range, location: b.location,
     status: b.status, owner_user_id: b.owner_user_id, opened_date: b.opened_date, notes: b.notes || null,
   });
   res.status(201).json(await jobRow(info.rows[0].id));
@@ -199,18 +283,20 @@ app.post('/api/jobs', ar(async (req, res) => {
 app.put('/api/jobs/:id', ar(async (req, res) => {
   const existing = await jobRow(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
-  const b = req.body || {};
-  const missing = missingField(b, ['client_id', 'title', 'employment_type', 'pay_range', 'location', 'status', 'owner_user_id', 'opened_date']);
+  const b = { ...(req.body || {}), employment_type: req.body?.employment_type || 'Contract', pay_range: req.body?.pay_range || '', location: req.body?.location || '', status: req.body?.status || 'Open', owner_user_id: req.body?.owner_user_id || req.account?.user_id || null, opened_date: req.body?.opened_date || new Date().toISOString().slice(0, 10) };
+  const missing = missingField(b, ['client_id', 'title', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('clients', b.client_id))) return res.status(400).json({ error: 'client_id does not reference a real client' });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, existing.office_id);
+  if (office.error) return res.status(400).json({ error: office.error });
   await run(`
     UPDATE jobs SET client_id = @client_id, title = @title, employment_type = @employment_type, pay_range = @pay_range,
-      location = @location, status = @status, owner_user_id = @owner_user_id, opened_date = @opened_date, notes = @notes
+      location = @location, status = @status, owner_user_id = @owner_user_id, opened_date = @opened_date, notes = @notes, office_id = @office_id
     WHERE id = @id
   `, {
-    id: req.params.id, client_id: b.client_id, title: b.title, employment_type: b.employment_type, pay_range: b.pay_range,
+    office_id: office.value, id: req.params.id, client_id: b.client_id, title: b.title, employment_type: b.employment_type, pay_range: b.pay_range,
     location: b.location, status: b.status, owner_user_id: b.owner_user_id, opened_date: b.opened_date, notes: b.notes || null,
   });
   res.json(await jobRow(req.params.id));
@@ -246,37 +332,62 @@ app.get('/api/candidates', ar(async (req, res) => {
   res.json(await all(`${CANDIDATE_SELECT} ORDER BY cd.created_at DESC`));
 }));
 
+// Resume text -> candidate fields (no AI, no cost). The recruiter reviews the result before saving.
+app.post('/api/candidates/parse-resume', ar(async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (text.length < 20) return res.status(400).json({ error: 'Paste the resume text (at least a few lines).', code: 'resume_too_short' });
+  res.json(parseResumeText(text));
+}));
+
+// A candidate only needs a name (hourly and field workers often have no title, employer or email).
+function candidateDefaults(b, account) {
+  return {
+    ...b,
+    email: b.email || '', phone: b.phone || '', current_title: b.current_title || '', current_employer: b.current_employer || '',
+    skills: b.skills || '', source: b.source || 'Direct', owner_user_id: b.owner_user_id || account?.user_id || null,
+  };
+}
+
 app.post('/api/candidates', ar(async (req, res) => {
-  const b = req.body || {};
-  const missing = missingField(b, ['name', 'email', 'phone', 'current_title', 'current_employer', 'skills', 'source', 'owner_user_id']);
+  const b = candidateDefaults(req.body || {}, req.account);
+  const missing = missingField(b, ['name', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, null);
+  if (office.error) return res.status(400).json({ error: office.error });
   const info = await run(`
-    INSERT INTO candidates (name, email, phone, current_title, current_employer, skills, resume_summary, source, owner_user_id, created_at)
-    VALUES (@name, @email, @phone, @current_title, @current_employer, @skills, @resume_summary, @source, @owner_user_id, @created_at) RETURNING id
+    INSERT INTO candidates (name, email, phone, current_title, current_employer, skills, resume_summary, source, owner_user_id, created_at, office_id)
+    VALUES (@name, @email, @phone, @current_title, @current_employer, @skills, @resume_summary, @source, @owner_user_id, @created_at, @office_id) RETURNING id
   `, {
-    name: b.name, email: b.email, phone: b.phone, current_title: b.current_title, current_employer: b.current_employer,
+    office_id: office.value, name: b.name, email: b.email, phone: b.phone, current_title: b.current_title, current_employer: b.current_employer,
     skills: b.skills, resume_summary: b.resume_summary || null, source: b.source, owner_user_id: b.owner_user_id,
     created_at: b.created_at || new Date().toISOString().slice(0, 10),
   });
-  res.status(201).json(await candidateRow(info.rows[0].id));
+  if (b.source === 'Referral') {
+    await automationEngine.fire('candidate_referral', { relatedType: 'candidate', relatedId: info.rows[0].id, ownerUserId: b.owner_user_id, subject: `New referral candidate: ${b.name}` });
+  }
+  const created = await candidateRow(info.rows[0].id);
+  emitWebhook('candidate.created', created);
+  res.status(201).json(created);
 }));
 
 app.put('/api/candidates/:id', ar(async (req, res) => {
   const existing = await candidateRow(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
-  const b = req.body || {};
-  const missing = missingField(b, ['name', 'email', 'phone', 'current_title', 'current_employer', 'skills', 'source', 'owner_user_id']);
+  const b = candidateDefaults(req.body || {}, req.account);
+  const missing = missingField(b, ['name', 'owner_user_id']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('users', b.owner_user_id))) return res.status(400).json({ error: 'owner_user_id does not reference a real user' });
 
+  const office = await officeFrom(b, existing.office_id);
+  if (office.error) return res.status(400).json({ error: office.error });
   await run(`
     UPDATE candidates SET name = @name, email = @email, phone = @phone, current_title = @current_title, current_employer = @current_employer,
-      skills = @skills, resume_summary = @resume_summary, source = @source, owner_user_id = @owner_user_id
+      skills = @skills, resume_summary = @resume_summary, source = @source, owner_user_id = @owner_user_id, office_id = @office_id
     WHERE id = @id
   `, {
-    id: req.params.id, name: b.name, email: b.email, phone: b.phone, current_title: b.current_title, current_employer: b.current_employer,
+    office_id: office.value, id: req.params.id, name: b.name, email: b.email, phone: b.phone, current_title: b.current_title, current_employer: b.current_employer,
     skills: b.skills, resume_summary: b.resume_summary || null, source: b.source, owner_user_id: b.owner_user_id,
   });
   res.json(await candidateRow(req.params.id));
@@ -311,6 +422,11 @@ const SUBMISSION_SELECT = `
 async function submissionRow(id) {
   return get(`${SUBMISSION_SELECT} WHERE s.id = ?`, id);
 }
+async function fireSubmitted(id) {
+  const row = await submissionRow(id);
+  if (!row) return;
+  await automationEngine.fire('submission_submitted', { relatedType: 'submission', relatedId: row.id, ownerUserId: row.owner_user_id, subject: `${row.candidate_name} was submitted to ${row.client_name} for ${row.job_title}` });
+}
 const SUBMISSION_STAGES = ['Sourced', 'Screened', 'Submitted to Client', 'Client Interview', 'Offer', 'Placed', 'Rejected', 'Withdrawn'];
 
 app.get('/api/submissions', ar(async (req, res) => {
@@ -333,7 +449,10 @@ app.post('/api/submissions', ar(async (req, res) => {
     candidate_id: b.candidate_id, job_id: b.job_id, stage: b.stage, owner_user_id: b.owner_user_id,
     submitted_date: b.submitted_date, notes: b.notes || null,
   });
-  res.status(201).json(await submissionRow(info.rows[0].id));
+  if (b.stage === 'Submitted to Client') await fireSubmitted(info.rows[0].id);
+  const made = await submissionRow(info.rows[0].id);
+  emitWebhook('submission.stage_changed', { ...made, previous_stage: null });
+  res.status(201).json(made);
 }));
 
 app.put('/api/submissions/:id', ar(async (req, res) => {
@@ -355,7 +474,10 @@ app.put('/api/submissions/:id', ar(async (req, res) => {
     id: req.params.id, candidate_id: b.candidate_id, job_id: b.job_id, stage: b.stage, owner_user_id: b.owner_user_id,
     submitted_date: b.submitted_date, notes: b.notes || null,
   });
-  res.json(await submissionRow(req.params.id));
+  if (b.stage === 'Submitted to Client' && existing.stage !== 'Submitted to Client') await fireSubmitted(req.params.id);
+  const saved = await submissionRow(req.params.id);
+  if (existing.stage !== b.stage) emitWebhook('submission.stage_changed', { ...saved, previous_stage: existing.stage });
+  res.json(saved);
 }));
 
 app.patch('/api/submissions/:id/stage', ar(async (req, res) => {
@@ -364,7 +486,10 @@ app.patch('/api/submissions/:id/stage', ar(async (req, res) => {
   const { stage } = req.body || {};
   if (!SUBMISSION_STAGES.includes(stage)) return res.status(400).json({ error: 'invalid stage' });
   await run(`UPDATE submissions SET stage = ? WHERE id = ?`, stage, req.params.id);
-  res.json(await submissionRow(req.params.id));
+  if (stage === 'Submitted to Client' && existing.stage !== 'Submitted to Client') await fireSubmitted(req.params.id);
+  const moved = await submissionRow(req.params.id);
+  if (existing.stage !== stage) emitWebhook('submission.stage_changed', { ...moved, previous_stage: existing.stage });
+  res.json(moved);
 }));
 
 app.delete('/api/submissions/:id', ar(async (req, res) => {
@@ -431,6 +556,15 @@ app.put('/api/interviews/:id', ar(async (req, res) => {
     id: req.params.id, submission_id: b.submission_id, interviewer_name: b.interviewer_name, scheduled_at: b.scheduled_at,
     type: b.type, status: b.status, notes: b.notes || null,
   });
+  if (b.status === 'Completed' && existing.status !== 'Completed') {
+    const sub = await get(`SELECT owner_user_id FROM submissions WHERE id = ?`, b.submission_id);
+    const who = await interviewRow(req.params.id);
+    await automationEngine.fire('interview_completed', {
+      relatedType: 'interview', relatedId: Number(req.params.id), ownerUserId: sub?.owner_user_id,
+      subject: `Follow up with ${who.client_name} about ${who.candidate_name} (${who.job_title}) - interview finished`,
+      occurredAt: new Date(Date.now() + 3 * 86400000).toISOString(), // the reminder is due in 3 days
+    });
+  }
   res.json(await interviewRow(req.params.id));
 }));
 
@@ -475,7 +609,9 @@ app.post('/api/placements', ar(async (req, res) => {
     start_date: b.start_date, end_date: b.end_date || null, pay_rate: Number(b.pay_rate) || 0,
     bill_rate: Number(b.bill_rate) || 0, placement_fee: Number(b.placement_fee) || 0, status: b.status,
   });
-  res.status(201).json(await placementRow(info.rows[0].id));
+  const placed = await placementRow(info.rows[0].id);
+  emitWebhook('placement.created', placed);
+  res.status(201).json(placed);
 }));
 
 app.put('/api/placements/:id', ar(async (req, res) => {
@@ -513,7 +649,10 @@ app.delete('/api/placements/:id', ar(async (req, res) => {
 
 // -------------------- timesheets & invoicing --------------------
 const TIMESHEET_SELECT = `
-  SELECT t.*, cd.name AS candidate_name, c.company_name AS client_name, j.title AS job_title
+  SELECT t.*, cd.name AS candidate_name, c.company_name AS client_name, j.title AS job_title,
+    p.pay_rate, p.bill_rate, c.portal_enabled AS client_portal_enabled,
+    ROUND((t.hours * p.pay_rate)::numeric, 2)::float8 AS cost,
+    ROUND((t.amount - t.hours * p.pay_rate)::numeric, 2)::float8 AS margin
   FROM timesheets_invoices t
   JOIN placements p ON p.id = t.placement_id
   JOIN candidates cd ON cd.id = p.candidate_id
@@ -528,9 +667,16 @@ app.get('/api/timesheets', ar(async (req, res) => {
   res.json(await all(`${TIMESHEET_SELECT} ORDER BY t.period_end DESC`));
 }));
 
+// The amount may be left blank: it becomes hours x the placement's bill rate.
+async function timesheetAmount(b, placementId) {
+  if (b.amount !== undefined && b.amount !== null && b.amount !== '') return Number(b.amount) || 0;
+  const p = await get(`SELECT bill_rate FROM placements WHERE id = ?`, placementId);
+  return Math.round((Number(b.hours) || 0) * (Number(p?.bill_rate) || 0) * 100) / 100;
+}
+
 app.post('/api/timesheets', ar(async (req, res) => {
   const b = req.body || {};
-  const missing = missingField(b, ['placement_id', 'period_start', 'period_end', 'hours', 'amount', 'status']);
+  const missing = missingField(b, ['placement_id', 'period_start', 'period_end', 'hours', 'status']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('placements', b.placement_id))) return res.status(400).json({ error: 'placement_id does not reference a real placement' });
 
@@ -539,7 +685,7 @@ app.post('/api/timesheets', ar(async (req, res) => {
     VALUES (@placement_id, @period_start, @period_end, @hours, @amount, @status) RETURNING id
   `, {
     placement_id: b.placement_id, period_start: b.period_start, period_end: b.period_end,
-    hours: Number(b.hours) || 0, amount: Number(b.amount) || 0, status: b.status,
+    hours: Number(b.hours) || 0, amount: await timesheetAmount(b, b.placement_id), status: b.status,
   });
   res.status(201).json(await timesheetRow(info.rows[0].id));
 }));
@@ -548,19 +694,63 @@ app.put('/api/timesheets/:id', ar(async (req, res) => {
   const existing = await timesheetRow(req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
   const b = req.body || {};
-  const missing = missingField(b, ['placement_id', 'period_start', 'period_end', 'hours', 'amount', 'status']);
+  const missing = missingField(b, ['placement_id', 'period_start', 'period_end', 'hours', 'status']);
   if (missing) return res.status(400).json({ error: `${missing} is required` });
   if (!(await rowExists('placements', b.placement_id))) return res.status(400).json({ error: 'placement_id does not reference a real placement' });
 
+  const amount = await timesheetAmount(b, b.placement_id);
   await run(`
     UPDATE timesheets_invoices SET placement_id = @placement_id, period_start = @period_start, period_end = @period_end,
       hours = @hours, amount = @amount, status = @status
     WHERE id = @id
   `, {
     id: req.params.id, placement_id: b.placement_id, period_start: b.period_start, period_end: b.period_end,
-    hours: Number(b.hours) || 0, amount: Number(b.amount) || 0, status: b.status,
+    hours: Number(b.hours) || 0, amount, status: b.status,
   });
+  if (existing.status !== b.status) emitWebhook('timesheet.status_changed', { id: Number(req.params.id), previous_status: existing.status, status: b.status });
+  // The client approved a different number: the approval no longer stands.
+  if (Number(existing.hours) !== (Number(b.hours) || 0) || Number(existing.amount) !== amount) {
+    await run(`UPDATE timesheets_invoices SET client_approved_at = NULL, client_approved_by = NULL WHERE id = ?`, req.params.id);
+  }
   res.json(await timesheetRow(req.params.id));
+}));
+
+// Invoice data for the print page (INV-0001 style number, agency details, client, one line, total, due date, "Pay online" link).
+app.get('/api/timesheets/:id/invoice', ar(async (req, res) => {
+  const inv = await buildInvoice(Number(req.params.id) || 0);
+  if (!inv) return res.status(404).json({ error: 'not found' });
+  res.json(inv);
+}));
+
+// E-mails the invoice to the client's contact with their private portal link. Draft becomes Sent.
+app.post('/api/timesheets/:id/send-invoice', blockDemo, ar(async (req, res) => {
+  const t = await timesheetRow(req.params.id);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  const client = await get(`SELECT c.* FROM clients c JOIN placements p ON p.client_id = c.id WHERE p.id = ?`, t.placement_id);
+  if (!client.contact_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(client.contact_email)) return res.status(400).json({ error: 'This client has no valid contact e-mail. Add it on the Clients page.', code: 'no_contact_email' });
+  if (!client.portal_enabled || !client.portal_token) return res.status(409).json({ error: 'Turn on the client portal for this client first (Clients page).', code: 'portal_disabled' });
+  if (!isMailConfigured()) return res.status(503).json({ error: 'E-mail is not set up on this server yet. Ask your administrator.', code: 'email_not_configured' });
+  const a = await readProfile();
+  const base = (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const link = `${base}/#/portal/${client.portal_token}`;
+  const num = invoiceNumber(t.id);
+  const text = [
+    `Hello ${client.contact_name || ''},`.replace(' ,', ','),
+    '',
+    `${a.name || 'Your staffing partner'} sent you invoice ${num} for ${t.candidate_name} (${t.job_title}), period ${t.period_start} to ${t.period_end}: ${Number(t.hours)} hours, total $${Number(t.amount).toFixed(2)}.`,
+    '',
+    'You can review, approve and print it here:',
+    link,
+    ...(a.payment_url ? ['', `Pay online: ${a.payment_url}`] : []),
+    ...(a.payment_note ? ['', a.payment_note] : []),
+    '',
+    a.name || '',
+  ].join('\n');
+  await sendEmail({ to: client.contact_email, subject: `Invoice ${num} from ${a.name || 'your staffing partner'}`, text, replyTo: a.email || req.account?.email, fromName: a.name });
+  await run(`UPDATE timesheets_invoices SET invoice_sent_at = now(), status = CASE WHEN status = 'Draft' THEN 'Sent' ELSE status END WHERE id = ?`, t.id);
+  const after = await timesheetRow(t.id);
+  if (after.status !== t.status) emitWebhook('timesheet.status_changed', { id: t.id, previous_status: t.status, status: after.status });
+  res.json(after);
 }));
 
 app.delete('/api/timesheets/:id', ar(async (req, res) => {
@@ -571,6 +761,12 @@ app.delete('/api/timesheets/:id', ar(async (req, res) => {
 }));
 
 // -------------------- activities (dashboard feed) --------------------
+mountPortalStaff(app, ar, { requirePlan, blockDemo });
+mountMessaging(app, ar, { requireOwner, blockDemo });
+mountSignatures(app, ar, { requirePlan, blockDemo });
+mountTools(app, ar, { requirePlan, blockDemo, requireOwner });
+mountIntegrationsAdmin(app, ar, { requirePlan, requireOwner, blockDemo });
+
 app.get('/api/activities', ar(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 200);
   const rows = await all(`
@@ -584,30 +780,43 @@ app.get('/api/activities', ar(async (req, res) => {
 }));
 
 // -------------------- automations --------------------
+const AUTOMATION_SELECT = `
+  SELECT a.*, (SELECT COUNT(*) FROM automation_runs r WHERE r.automation_id = a.id AND r.ran_at > now() - interval '30 days') AS runs_30d_real
+  FROM automations a`;
+const shapeAutomation = (r) => ({ ...r, runs_30d: r.runs_30d_real, runnable: !!r.trigger_type });
+
+app.get('/api/automations/catalog', ar(async (req, res) => {
+  res.json(Object.entries(automationEngine.TRIGGERS).map(([id, t]) => ({ id, ...t })));
+}));
+
 app.get('/api/automations', ar(async (req, res) => {
-  res.json(await all(`SELECT * FROM automations ORDER BY name`));
+  res.json((await all(`${AUTOMATION_SELECT} ORDER BY a.name`)).map(shapeAutomation));
 }));
 
 app.post('/api/automations', ar(async (req, res) => {
   const b = req.body || {};
-  const missing = missingField(b, ['name', 'trigger_desc', 'action_desc']);
-  if (missing) return res.status(400).json({ error: `${missing} is required` });
-
+  const t = automationEngine.TRIGGERS[b.trigger_type];
+  if (!String(b.name || '').trim()) return res.status(400).json({ error: 'name is required' });
+  if (!t) return res.status(400).json({ error: 'Choose what starts this rule', code: 'invalid_trigger' });
   const info = await run(`
-    INSERT INTO automations (name, trigger_desc, action_desc, active, runs_30d)
-    VALUES (@name, @trigger_desc, @action_desc, @active, 0) RETURNING id
-  `, {
-    name: b.name, trigger_desc: b.trigger_desc, action_desc: b.action_desc, active: b.active === false ? 0 : 1,
-  });
-  res.status(201).json(await get(`SELECT * FROM automations WHERE id = ?`, info.rows[0].id));
+    INSERT INTO automations (name, trigger_desc, action_desc, active, runs_30d, trigger_type, action_type)
+    VALUES (@name, @trigger_desc, @action_desc, @active, 0, @trigger_type, 'notify') RETURNING id
+  `, { name: b.name.trim(), trigger_desc: t.desc, action_desc: t.action, active: b.active === false ? 0 : 1, trigger_type: b.trigger_type });
+  res.status(201).json(shapeAutomation(await get(`${AUTOMATION_SELECT} WHERE a.id = ?`, info.rows[0].id)));
 }));
 
 app.patch('/api/automations/:id/active', ar(async (req, res) => {
   const existing = await get(`SELECT * FROM automations WHERE id = ?`, req.params.id);
   if (!existing) return res.status(404).json({ error: 'not found' });
   const { active } = req.body || {};
+  if (active && !existing.trigger_type) return res.status(400).json({ error: 'This old rule has no trigger and cannot run. Delete it and create it again.', code: 'rule_not_runnable' });
   await run(`UPDATE automations SET active = ? WHERE id = ?`, active ? 1 : 0, req.params.id);
-  res.json(await get(`SELECT * FROM automations WHERE id = ?`, req.params.id));
+  res.json(shapeAutomation(await get(`${AUTOMATION_SELECT} WHERE a.id = ?`, req.params.id)));
+}));
+
+// Run the daily checks now (job open 30+ days, overdue timesheets) instead of waiting for the hourly pass.
+app.post('/api/automations/run-now', ar(async (req, res) => {
+  res.json({ fired: await automationEngine.runScheduled() });
 }));
 
 app.delete('/api/automations/:id', ar(async (req, res) => {
@@ -671,20 +880,25 @@ app.get('/api/dashboard', ar(async (req, res) => {
 
   // scheduled_at is stored as text (e.g. '2026-07-22T10:00'); SQLite's date()
   // has no Postgres equivalent, so compare on the ISO date prefix instead.
+  const today = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const monday = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - ((today.getUTCDay() + 6) % 7)));
+  const weekStart = iso(monday), weekEnd = iso(new Date(monday.getTime() + 6 * 86400000));
+  const recentFrom = iso(new Date(today.getTime() - 30 * 86400000)), todayIso = iso(today);
   const interviewsThisWeek = (await get(`
-    SELECT COUNT(*) AS n FROM interviews WHERE substr(scheduled_at, 1, 10) BETWEEN '2026-09-14' AND '2026-09-20'
-  `)).n;
+    SELECT COUNT(*) AS n FROM interviews WHERE substr(scheduled_at, 1, 10) BETWEEN ? AND ?
+  `, weekStart, weekEnd)).n;
 
   const placementsRecent = (await get(`
-    SELECT COUNT(*) AS n FROM placements WHERE start_date BETWEEN '2026-08-01' AND '2026-09-15'
-  `)).n;
+    SELECT COUNT(*) AS n FROM placements WHERE start_date BETWEEN ? AND ?
+  `, recentFrom, todayIso)).n;
 
   const feesFromNewPlacements = (await get(`
-    SELECT COALESCE(SUM(placement_fee), 0) AS v FROM placements WHERE start_date BETWEEN '2026-08-01' AND '2026-09-15'
-  `)).v;
+    SELECT COALESCE(SUM(placement_fee), 0) AS v FROM placements WHERE start_date BETWEEN ? AND ?
+  `, recentFrom, todayIso)).v;
   const paidTimesheetRevenue = (await get(`
-    SELECT COALESCE(SUM(amount), 0) AS v FROM timesheets_invoices WHERE status = 'Paid' AND period_end BETWEEN '2026-08-01' AND '2026-09-15'
-  `)).v;
+    SELECT COALESCE(SUM(amount), 0) AS v FROM timesheets_invoices WHERE status = 'Paid' AND period_end BETWEEN ? AND ?
+  `, recentFrom, todayIso)).v;
   const revenueRecent = feesFromNewPlacements + paidTimesheetRevenue;
 
   const submissionsByStage = await all(`
@@ -716,15 +930,16 @@ app.get('/api/dashboard', ar(async (req, res) => {
   // replaces SQLite's julianday() arithmetic.
   const openJobsAging = await all(`
     SELECT j.id, j.title, j.opened_date, c.company_name AS client_name,
-      (DATE '2026-09-15' - j.opened_date::date) AS days_open
+      (?::date - j.opened_date::date) AS days_open
     FROM jobs j JOIN clients c ON c.id = j.client_id
     WHERE j.status = 'Open'
     ORDER BY days_open DESC
     LIMIT 5
-  `);
+  `, todayIso);
 
   res.json({
     kpis: { openJobs, activePipelineCandidates, interviewsThisWeek, placementsRecent, revenueRecent },
+    ranges: { weekStart, weekEnd, recentFrom, today: todayIso },
     submissionsByStage,
     upcomingInterviews,
     recentActivity,
@@ -765,7 +980,18 @@ app.get('/api/reports', ar(async (req, res) => {
   const totalPlacementFees = (await get(`SELECT COALESCE(SUM(placement_fee), 0) AS v FROM placements`)).v;
   const totalInvoiced = (await get(`SELECT COALESCE(SUM(amount), 0) AS v FROM timesheets_invoices`)).v;
 
+  // Results per office (the office of a placement is the office of its job).
+  const officeNames = new Map((await all(`SELECT id, name FROM offices`)).map((o) => [o.id, o.name]));
+  const feeRows = await all(`SELECT j.office_id, COUNT(*) AS placement_count, COALESCE(SUM(p.placement_fee), 0) AS total_fees FROM placements p JOIN jobs j ON j.id = p.job_id GROUP BY j.office_id`);
+  const billedRows = await all(`SELECT j.office_id, COALESCE(SUM(t.amount), 0) AS billed FROM timesheets_invoices t JOIN placements p ON p.id = t.placement_id JOIN jobs j ON j.id = p.job_id GROUP BY j.office_id`);
+  const officeKeys = new Set([...feeRows, ...billedRows].map((r) => r.office_id ?? 0));
+  const byOffice = [...officeKeys].map((k) => {
+    const f = feeRows.find((r) => (r.office_id ?? 0) === k), bl = billedRows.find((r) => (r.office_id ?? 0) === k);
+    return { office_id: k || null, office_name: k ? (officeNames.get(k) || '') : '', placement_count: f?.placement_count || 0, total_fees: Number(f?.total_fees) || 0, billed: Number(bl?.billed) || 0 };
+  }).sort((x, y) => y.billed - x.billed);
+
   res.json({
+    byOffice,
     funnelByStage,
     placementRate,
     placed,
@@ -796,11 +1022,20 @@ app.use((err, _req, res, next) => {
 });
 
 initSchema()
+  .then(() => initPhotoImportSchema(pool))
   .then(() => bootstrapOwner())
+  .then(() => backfillRecruiters())
+  .then(() => automationEngine.migrateAutomations())
+  .then(() => rollSampleDates())
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Roster API listening on http://localhost:${PORT}`);
     });
+    startPhotoBilling({ pool, getSubscription });
+    startDemoTrialScheduler();
+    automationEngine.startAutomationScheduler();
+    startSignaturePoller();
+    setInterval(() => rollSampleDates().catch(() => {}), 6 * 60 * 60 * 1000).unref();
   })
   .catch((err) => {
     console.error('Failed to initialize database schema:', err);

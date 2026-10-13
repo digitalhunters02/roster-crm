@@ -4,8 +4,9 @@ import crypto from 'node:crypto';
 import { get, all, run } from './db.js';
 import {
   MIN_PASSWORD_LENGTH, EMAIL_RE, normalizeEmail, hashPassword, verifyPassword, signToken, publicAccount,
-  accountByEmail, requireOwner, makeLimiter,
+  accountByEmail, requireOwner, makeLimiter, ensureRecruiter,
 } from './auth.js';
+import { reportLead } from './harborLead.js';
 import { sendPasswordResetEmail, isMailConfigured } from './mailer.js';
 
 const WINDOW_MS = Number(process.env.AUTH_RATE_WINDOW_MS || 15 * 60 * 1000);
@@ -115,6 +116,42 @@ export function publicAuthRoutes(app, ar) {
   app.post('/api/auth/reset-password', reset);
 }
 
+const DEMO_TRIAL_DAYS = 3;
+const demoByIp = makeLimiter({ windowMs: WINDOW_MS, max: 5 });
+
+// Self-serve "try it free for 3 days": a temporary login on the shared sample data (no card).
+// Public, rate limited. The hourly scheduler in demoTrial.js deletes the account when the 3 days end.
+export function demoTrialRoute(app, ar) {
+  app.post('/api/demo-request', ar(async (req, res) => {
+    const ip = clientIp(req);
+    const wait = demoByIp.blockedFor(ip);
+    if (wait) return tooMany(res, wait);
+    demoByIp.hit(ip);
+    const name = String(req.body?.name || '').trim();
+    const email = normalizeEmail(req.body?.email);
+    if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
+    if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Enter a valid email address', code: 'invalid_email' });
+
+    let existing = await accountByEmail(email);
+    if (existing && existing.is_demo_trial && new Date(existing.demo_expires_at) > new Date()) {
+      // Same visitor coming back mid-trial: same account, the countdown is not reset.
+      return res.json({ token: signToken(existing, true), account: publicAccount(existing) });
+    }
+    if (existing && !existing.is_demo_trial) {
+      return res.status(409).json({ error: 'An account with that email already exists. Please sign in instead.', code: 'email_in_use' });
+    }
+    if (existing) await run(`DELETE FROM accounts WHERE id = $1`, [existing.id]); // expired trial not yet swept
+    const throwaway = crypto.randomBytes(24).toString('hex');
+    const account = (await run(
+      `INSERT INTO accounts (name, email, password_hash, role, is_demo_trial, demo_expires_at)
+       VALUES ($1, $2, $3, 'staff', TRUE, now() + interval '${DEMO_TRIAL_DAYS} days') RETURNING *`,
+      [name, email, hashPassword(throwaway)]
+    )).rows[0];
+    reportLead({ name, email, notes: `${DEMO_TRIAL_DAYS}-day demo trial (demo-request)` });
+    res.status(201).json({ token: signToken(account, true), account: publicAccount(account) });
+  }));
+}
+
 export function accountRoutes(app, ar) {
   app.get('/api/auth/me', ar(async (req, res) => {
     res.json({ account: publicAccount(req.account) });
@@ -167,6 +204,7 @@ export function accountRoutes(app, ar) {
       [name, email, hashPassword(password)]
     );
     if (!r.rowCount) return res.status(409).json({ error: 'That email is already in use', code: 'email_in_use' });
+    await ensureRecruiter(r.rows[0]);
     res.status(201).json(publicAccount(r.rows[0]));
   }));
 

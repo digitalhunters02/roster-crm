@@ -39,3 +39,12 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   select,
   textarea { font-size: 16px !important; }
 }
+
+/* Printing an invoice: only the sheet, on white paper (the app itself is hidden). */
+@media print {
+  body.invoice-open #root { display: none !important; }
+  body.invoice-open, html:has(body.invoice-open) { position: static !important; overflow: visible !important; height: auto !important; background: #fff !important; }
+  body.invoice-open .invoice-overlay { position: static !important; background: none !important; padding: 0 !important; overflow: visible !important; }
+  body.invoice-open .invoice-actions { display: none !important; }
+  body.invoice-open .invoice-sheet { box-shadow: none !important; max-width: none !important; padding: 0 !important; }
+}

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { initialsOf } from '../format.js';
 import Icon from './Icon.jsx';
 
+import { useT } from '../auth/i18n.js';
 export const TONES = {
   neutral: { bg: '#EEECFA', fg: '#5B5F7A', border: '#E4E1F5' },
   brand: { bg: '#E7E4FB', fg: '#5B4EE0', border: '#D3CCF5' },
@@ -30,13 +31,14 @@ export function Button({ children, variant = 'default', size = 'md', className =
 }
 
 export function Badge({ children, tone = 'neutral', className = '' }) {
+  const { tq } = useT();
   const t = TONES[tone] || TONES.neutral;
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap ${className}`}
       style={{ background: t.bg, color: t.fg, border: `1px solid ${t.border}` }}
     >
-      {children}
+      {typeof children === 'string' ? tq(children) : children}
     </span>
   );
 }
@@ -122,6 +124,7 @@ export function Muted({ children }) {
 }
 
 export function Table({ cols, rows, rowH = 'py-3', keyField = 'id', onRowClick }) {
+  const { t } = useT();
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm border-collapse min-w-[720px]">
@@ -153,9 +156,7 @@ export function Table({ cols, rows, rowH = 'py-3', keyField = 'id', onRowClick }
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={cols.length} className="px-5 py-8 text-center text-sm text-muted">
-                No records yet.
-              </td>
+              <td colSpan={cols.length} className="px-5 py-8 text-center text-sm text-muted">{t('No records yet.')}</td>
             </tr>
           )}
         </tbody>
@@ -211,6 +212,8 @@ export function IconButton({ icon, onClick, title, tone = 'default', size = 15 }
 }
 
 export function RowActions({ onEdit, onDelete, editLabel = 'Edit', deleteLabel = 'Delete' }) {
+  const { t } = useT();
+  editLabel = t(editLabel); deleteLabel = t(deleteLabel);
   return (
     <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
       {onEdit && <IconButton icon="pencil" title={editLabel} onClick={onEdit} />}
@@ -292,19 +295,20 @@ export function Modal({ title, sub, onClose, children, footer, wide = false }) {
 }
 
 export function ConfirmDialog({ title, message, error, busy, onCancel, onConfirm, confirmLabel }) {
+  const { t } = useT();
   return (
     <Modal
-      title={title || 'Delete record?'}
+      title={title || t('Delete record?')}
       onClose={onCancel}
       footer={
         <>
-          <Button variant="outline" onClick={onCancel} disabled={busy}>Cancel</Button>
+          <Button variant="outline" onClick={onCancel} disabled={busy}>{t('Cancel')}</Button>
           <Button
             onClick={onConfirm}
             disabled={busy}
             className="!bg-rose hover:!bg-rose/90 text-white"
           >
-            {busy ? 'Deleting…' : (confirmLabel || 'Delete')}
+            {busy ? t('Deleting…') : (confirmLabel || t('Delete'))}
           </Button>
         </>
       }

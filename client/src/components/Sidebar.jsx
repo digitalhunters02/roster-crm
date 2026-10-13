@@ -4,9 +4,14 @@ import Icon from './Icon.jsx';
 import { Avatar } from './ui.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { useT } from '../auth/i18n.js';
+import { useBilling } from '../billing/useBilling.js';
+import { useProfile } from '../profile/useProfile.js';
+import Tour from '../tour/Tour.jsx';
 import { LogOutIcon } from '../auth/AuthIcons.jsx';
 
-const LOGO_KEY = 'roster-company-logo';
+const TOUR_KEY = 'roster-tour-done';
+// Menu entries that need a higher plan show a lock (the page itself explains the upgrade).
+const LOCKED_BY = { '/timesheets': 'timesheets', '/whatsapp': 'whatsapp' };
 
 const NAV = [
   { section: null, items: [{ to: '/', label: 'Dashboard', icon: 'dashboard' }] },
@@ -45,8 +50,9 @@ const NAV = [
 ];
 
 function BrandMark({ logo, size = 32 }) {
+  const { t } = useT();
   return logo ? (
-    <img src={logo} alt="Crestline Talent Partners" width={size} height={size} className="rounded-lg object-cover flex-shrink-0" style={{ width: size, height: size }} />
+    <img src={logo} alt={t('Crestline Talent Partners')} width={size} height={size} className="rounded-lg object-cover flex-shrink-0" style={{ width: size, height: size }} />
   ) : (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" className="flex-shrink-0">
       <rect x="1.5" y="1.5" width="29" height="29" rx="8" fill="#5B4EE0" />
@@ -60,26 +66,24 @@ function BrandMark({ logo, size = 32 }) {
 export default function Sidebar() {
   const { account, logout } = useAuth();
   const { t } = useT();
-  const [logo, setLogo] = useState(null);
+  const profile = useProfile();
+  const logo = profile.logo || null;
+  const { billing } = useBilling();
   const [open, setOpen] = useState(false);
+  const [tour, setTour] = useState(false);
 
+  // The getting-started guide opens by itself the first time each login arrives, and never again on its own.
   useEffect(() => {
+    if (!account) return;
+    const key = `${TOUR_KEY}-${account.id}`;
     try {
-      const saved = localStorage.getItem(LOGO_KEY);
-      if (saved) setLogo(saved);
-    } catch {
-      // ignore — localStorage unavailable
-    }
-    function onStorage() {
-      try {
-        setLogo(localStorage.getItem(LOGO_KEY));
-      } catch {
-        // ignore
-      }
-    }
-    window.addEventListener('roster-logo-updated', onStorage);
-    return () => window.removeEventListener('roster-logo-updated', onStorage);
-  }, []);
+      if (localStorage.getItem(key) === '1') return;
+      localStorage.setItem(key, '1');
+    } catch { /* storage blocked: the guide still opens once per page load */ }
+    setTour(true);
+  }, [account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function closeTour() { setTour(false); setOpen(false); }
 
   function closeDrawer() {
     setOpen(false);
@@ -92,7 +96,7 @@ export default function Sidebar() {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label="Open menu"
+          aria-label={t('Open menu')}
           className="p-1.5 -ml-1.5 rounded-md text-white hover:bg-side2 transition-colors"
         >
           <Icon name="menu" size={22} stroke="currentColor" />
@@ -119,9 +123,9 @@ export default function Sidebar() {
       >
         <div className="flex items-center gap-2.5 px-5 pt-6 pb-5 flex-shrink-0">
           <BrandMark logo={logo} size={32} />
-          <div>
+          <div className="min-w-0">
             <p className="font-display font-bold text-[17px] text-white leading-tight">Roster</p>
-            <p className="text-[11px] text-sideMuted leading-tight">Crestline Talent Partners</p>
+            <p className="text-[11px] text-sideMuted leading-tight truncate">{profile.name || t('Staffing CRM')}</p>
           </div>
         </div>
 
@@ -130,7 +134,7 @@ export default function Sidebar() {
             <div key={gi} className="mb-4">
               {group.section && (
                 <p className="px-3 mb-1.5 text-[10.5px] font-bold uppercase tracking-wider text-sideMuted">
-                  {group.section}
+                  {t(group.section)}
                 </p>
               )}
               <div className="space-y-0.5">
@@ -138,6 +142,7 @@ export default function Sidebar() {
                   <NavLink
                     key={item.to}
                     to={item.to}
+                    data-tour={`nav-${item.to === '/' ? 'dashboard' : item.to.slice(1)}`}
                     end={item.to === '/'}
                     onClick={closeDrawer}
                     className={({ isActive }) =>
@@ -152,7 +157,10 @@ export default function Sidebar() {
                           <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-coral" />
                         )}
                         <Icon name={item.icon} size={16} stroke={isActive ? '#B9AFF7' : '#8A82B8'} />
-                        {item.label}
+                        <span className="flex-1 min-w-0 truncate">{t(item.label)}</span>
+                        {LOCKED_BY[item.to] && billing && billing.features && billing.features[LOCKED_BY[item.to]] === false && (
+                          <span title={t('Not in your plan')} data-testid={`lock-${item.to.slice(1)}`}><Icon name="lock" size={13} stroke="#8A82B8" /></span>
+                        )}
                       </>
                     )}
                   </NavLink>
@@ -160,6 +168,18 @@ export default function Sidebar() {
               </div>
             </div>
           ))}
+          <div className="mb-2">
+            <button
+              type="button"
+              data-tour="nav-tour"
+              data-testid="open-tour"
+              onClick={() => setTour(true)}
+              className="w-full relative flex items-center gap-2.5 px-3 py-2 rounded-md text-[13.5px] font-semibold text-sideText hover:bg-side2/60 hover:text-white transition-colors"
+            >
+              <Icon name="compass" size={16} stroke="#8A82B8" />
+              {t('Getting started')}
+            </button>
+          </div>
         </nav>
 
         <div className="px-4 py-3.5 border-t border-sideLine flex items-center gap-2.5 flex-shrink-0">
@@ -182,6 +202,7 @@ export default function Sidebar() {
           </button>
         </div>
       </aside>
+      <Tour open={tour} onClose={closeTour} ensureNav={() => setOpen(true)} />
     </>
   );
 }

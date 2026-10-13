@@ -69,7 +69,7 @@ before(async () => {
   admin = new pg.Client({ connectionString: ADMIN_URL });
   await admin.connect();
   await admin.query(`CREATE DATABASE ${DB_NAME}`);
-  const seed = spawnSync('node', [path.join(SRC, 'seed.js')], { env: { ...process.env, DATABASE_URL: DB_URL }, encoding: 'utf8' });
+  const seed = spawnSync('node', [path.join(SRC, 'seed.js')], { env: { ...process.env, DATABASE_URL: DB_URL, SEED_SAMPLE_DATA: '1' }, encoding: 'utf8' });
   assert.equal(seed.status, 0, seed.stderr);
 });
 

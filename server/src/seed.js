@@ -13,6 +13,13 @@ async function main() {
     return;
   }
 
+  // Sample data ("Crestline Talent Partners") is only for the demo / free-trial instance. A customer install starts
+  // empty (just the owner login) unless SEED_SAMPLE_DATA=1 is set.
+  if (process.env.SEED_SAMPLE_DATA !== '1') {
+    console.log('SEED_SAMPLE_DATA is not 1 - starting with an empty database (no sample data).');
+    return;
+  }
+
   // -------------------- users --------------------
   const userRows = [
     { name: 'Maya Solano', email: 'maya.solano@crestlinetalent.com', role: 'Managing Partner', initials: 'MS', color: '#5B4EE0' },

@@ -12,6 +12,7 @@ import Reports from './pages/Reports.jsx';
 import Settings from './pages/Settings.jsx';
 import WhatsApp from './pages/WhatsApp.jsx';
 import Login from './pages/Login.jsx';
+import Portal from './pages/Portal.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
 import { Terms, Privacy } from './pages/Legal.jsx';
 import { useAuth } from './auth/AuthContext.jsx';
@@ -30,6 +31,7 @@ export default function App() {
   if (!token) {
     return (
       <Routes>
+        <Route path="/portal/:token" element={<Portal />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
@@ -43,6 +45,7 @@ export default function App() {
 
   return (
     <Routes>
+      <Route path="/portal/:token" element={<Portal />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />

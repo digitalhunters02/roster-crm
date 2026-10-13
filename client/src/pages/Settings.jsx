@@ -9,9 +9,51 @@ import { downloadCsv } from '../csv.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { MyAccountCard, StaffCard } from '../auth/AccountPanel.jsx';
 
+import { useT } from '../auth/i18n.js';
+import PlanCard from '../billing/PlanCard.jsx';
+import { OfficesCard, ConnectionsCard, DeveloperCard } from '../components/CompleteSettings.jsx';
+import { useProfile, saveProfile } from '../profile/useProfile.js';
+function SmsConnectForm({ webhookUrl, onClose, onConnected }) {
+  const { t } = useT();
+  const [v, setV] = useState({ account_sid: '', auth_token: '', from_number: '' });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (k) => (e) => setV((p) => ({ ...p, [k]: e.target.value }));
+  async function submit() {
+    setBusy(true); setError(null);
+    try { await api.smsConnect(v); onConnected(); } catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+  return (
+    <Modal
+      title={t('Connect SMS (Twilio)')}
+      sub={t('Texts are sent from your own Twilio account and number, so the cost and the sender are yours.')}
+      onClose={onClose}
+      footer={<>
+        <Button variant="outline" onClick={onClose} disabled={busy}>{t('Cancel')}</Button>
+        <Button onClick={submit} disabled={busy || !v.account_sid || !v.auth_token || !v.from_number} data-testid="sms-connect-save">{busy ? t('Connecting…') : t('Connect')}</Button>
+      </>}
+    >
+      <FormError error={error} />
+      <Field label={t('Account SID')} required hint={t('Starts with AC. Find it on your Twilio console home page.')}>
+        <TextInput value={v.account_sid} onChange={set('account_sid')} placeholder="AC…" autoComplete="off" data-testid="sms-sid" />
+      </Field>
+      <Field label={t('Auth Token')} required hint={t('Stored encrypted and never shown again.')}>
+        <TextInput type="password" value={v.auth_token} onChange={set('auth_token')} autoComplete="new-password" data-testid="sms-token" />
+      </Field>
+      <Field label={t('Twilio phone number')} required>
+        <TextInput value={v.from_number} onChange={set('from_number')} placeholder="+15125550123" data-testid="sms-from" />
+      </Field>
+      <Field label={t('Reply webhook')} hint={t('In Twilio, set this as “A message comes in” for your number so replies and STOP show up here.')}>
+        <TextInput readOnly value={webhookUrl || ''} onFocus={(e) => e.target.select()} />
+      </Field>
+    </Modal>
+  );
+}
+
 const WHATSAPP_WEBHOOK_URL = `${BASE}/integrations/whatsapp/webhook`;
 
 function WhatsAppConnectForm({ onClose, onConnected }) {
+  const { t } = useT();
   const [form, setForm] = useState({ phoneNumberId: '', accessToken: '', businessAccountId: '', verifyToken: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -45,86 +87,42 @@ function WhatsAppConnectForm({ onClose, onConnected }) {
 
   return (
     <Modal
-      title="Connect WhatsApp"
-      sub="Paste credentials from Meta's developer console for your WhatsApp Business number."
+      title={t('Connect WhatsApp')}
+      sub={t('Paste credentials from Meta\'s developer console for your WhatsApp Business number.')}
       onClose={onClose}
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button onClick={submit} disabled={busy}>{busy ? 'Connecting…' : 'Connect'}</Button>
+          <Button variant="outline" onClick={onClose} disabled={busy}>{t('Cancel')}</Button>
+          <Button onClick={submit} disabled={busy}>{busy ? t('Connecting…') : t('Connect')}</Button>
         </>
       }
     >
       <form onSubmit={submit}>
         <FormError error={error} />
-        <Field label="Phone Number ID" required hint="From Meta's WhatsApp > API Setup page.">
+        <Field label={t('Phone Number ID')} required hint={t('From Meta\'s WhatsApp > API Setup page.')}>
           <TextInput value={form.phoneNumberId} onChange={set('phoneNumberId')} placeholder="e.g. 109876543210987" />
         </Field>
-        <Field label="Access Token" required hint="A permanent (system user) token is recommended over a 24-hour test token.">
-          <TextInput type="password" value={form.accessToken} onChange={set('accessToken')} placeholder="EAAG..." />
+        <Field label={t('Access Token')} required hint={t('A permanent (system user) token is recommended over a 24-hour test token.')}>
+          <TextInput type="password" value={form.accessToken} onChange={set('accessToken')} placeholder={t('EAAG...')} />
         </Field>
-        <Field label="Business Account ID" hint="Optional — WhatsApp Business Account (WABA) ID.">
+        <Field label={t('Business Account ID')} hint={t('Optional — WhatsApp Business Account (WABA) ID.')}>
           <TextInput value={form.businessAccountId} onChange={set('businessAccountId')} />
         </Field>
-        <Field label="Verify Token" hint="Optional — a string you choose and also paste into Meta's webhook setup, below.">
-          <TextInput value={form.verifyToken} onChange={set('verifyToken')} placeholder="e.g. roster-verify" />
+        <Field label={t('Verify Token')} hint={t('Optional — a string you choose and also paste into Meta\'s webhook setup, below.')}>
+          <TextInput value={form.verifyToken} onChange={set('verifyToken')} placeholder={t('e.g. roster-verify')} />
         </Field>
         <div className="rounded-md border border-line bg-wash px-3 py-2.5 mt-1">
-          <p className="text-xs font-semibold text-muted mb-1">Webhook callback URL</p>
+          <p className="text-xs font-semibold text-muted mb-1">{t('Webhook callback URL')}</p>
           <p className="text-xs text-ink break-all font-mono">{WHATSAPP_WEBHOOK_URL}</p>
-          <p className="text-xs text-faint mt-1.5">Paste this — plus the Verify Token above — into Meta's WhatsApp &gt; Configuration &gt; Webhook setup.</p>
+          <p className="text-xs text-faint mt-1.5">{t('Paste this — plus the Verify Token above — into Meta\'s WhatsApp > Configuration > Webhook setup.')}</p>
         </div>
       </form>
     </Modal>
   );
 }
 
-const PROFILE_KEY = 'roster-company-profile';
-const NOTIFICATIONS_KEY = 'roster-notifications-settings';
-const LOGO_KEY = 'roster-company-logo';
-
-const DEFAULT_PROFILE = {
-  name: 'Crestline Talent Partners',
-  address: '400 Congress Ave, Suite 1200, Austin, TX 78701',
-  phone: '(512) 555-0100',
-  email: 'hello@crestlinetalent.com',
-  description: 'Specializing in technical and professional placements — contract, contract-to-hire and permanent, since 2016.',
-};
-
-const DEFAULT_NOTIFICATIONS = {
-  newSubmissions: true,
-  interviewReminders: true,
-  jobAging: true,
-  overdueInvoices: true,
-  weeklyDigest: false,
-};
-
-const NOTIFICATION_ITEMS = [
-  { key: 'newSubmissions', label: 'New submissions', desc: 'Alert me when a candidate is submitted to a client.' },
-  { key: 'interviewReminders', label: 'Interview reminders', desc: 'Remind me a day before a scheduled interview.' },
-  { key: 'jobAging', label: 'Job aging alerts', desc: 'Notify me when an open job passes 30 days.' },
-  { key: 'overdueInvoices', label: 'Overdue invoices', desc: 'Flag timesheets/invoices that go overdue.' },
-  { key: 'weeklyDigest', label: 'Weekly recruiter digest', desc: 'A Monday-morning summary of pipeline activity.' },
-];
-
-function loadJson(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveJson(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // best-effort persistence only
-  }
-}
-
 export default function Settings() {
+  const { t } = useT();
   const { account } = useAuth();
   const [users, setUsers] = useState(null);
   const [candidates, setCandidates] = useState([]);
@@ -132,12 +130,22 @@ export default function Settings() {
   const [clients, setClients] = useState([]);
   const [placements, setPlacements] = useState([]);
 
-  const [profile, setProfile] = useState(() => loadJson(PROFILE_KEY, DEFAULT_PROFILE));
+  const profile = useProfile();
+  const logo = profile.logo || null;
+  const owner = account?.role === 'owner';
   const [editingProfile, setEditingProfile] = useState(false);
   const [draftProfile, setDraftProfile] = useState(profile);
   const [profileSaved, setProfileSaved] = useState(false);
+  const [profileError, setProfileError] = useState('');
 
-  const [notifications, setNotifications] = useState(() => loadJson(NOTIFICATIONS_KEY, DEFAULT_NOTIFICATIONS));
+  const [smsStatus, setSmsStatus] = useState(null);
+  const [smsModal, setSmsModal] = useState(false);
+  const [smsBusy, setSmsBusy] = useState(false);
+  const refreshSms = () => api.smsStatus().then(setSmsStatus).catch(() => setSmsStatus({ connected: false }));
+  async function disconnectSms() {
+    setSmsBusy(true);
+    try { await api.smsDisconnect(); await refreshSms(); } finally { setSmsBusy(false); }
+  }
 
   const [waStatus, setWaStatus] = useState(null);
   const [waModalOpen, setWaModalOpen] = useState(false);
@@ -163,13 +171,10 @@ export default function Settings() {
   }
 
   const fileRef = useRef(null);
-  const [logo, setLogo] = useState(() => {
-    try {
-      return localStorage.getItem(LOGO_KEY) || null;
-    } catch {
-      return null;
-    }
-  });
+
+  useEffect(() => {
+    if (/[?&]plan=1/.test(window.location.hash)) setTimeout(() => document.getElementById('plan')?.scrollIntoView({ block: 'start' }), 400);
+  }, []);
 
   useEffect(() => {
     api.users().then(setUsers);
@@ -178,6 +183,7 @@ export default function Settings() {
     api.clients().then(setClients);
     api.placements().then(setPlacements);
     refreshWhatsAppStatus();
+    refreshSms();
   }, []);
 
   function startEditProfile() {
@@ -190,35 +196,27 @@ export default function Settings() {
     setEditingProfile(false);
   }
 
-  function saveProfile() {
-    setProfile(draftProfile);
-    saveJson(PROFILE_KEY, draftProfile);
-    setEditingProfile(false);
-    setProfileSaved(true);
-    setTimeout(() => setProfileSaved(false), 3000);
-  }
-
-  function toggleNotification(key) {
-    setNotifications((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
-      saveJson(NOTIFICATIONS_KEY, next);
-      return next;
-    });
+  async function submitProfile() {
+    setProfileError('');
+    try {
+      const { name, address, phone, email, description, payment_url, payment_note } = draftProfile;
+      await saveProfile({ name, address, phone, email, description, payment_url, payment_note });
+      setEditingProfile(false);
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(false), 3000);
+    } catch (e) {
+      setProfileError(e.status === 400 ? e.message : t('Only the account owner can change the agency profile.'));
+    }
   }
 
   function onPickLogo(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
+    if (file.size > 300 * 1024) { setProfileError(t('The logo must be a PNG, JPEG or WebP image under 300 KB.')); return; }
     const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      setLogo(dataUrl);
-      try {
-        localStorage.setItem(LOGO_KEY, dataUrl);
-      } catch {
-        // best-effort persistence only
-      }
-      window.dispatchEvent(new Event('roster-logo-updated'));
+    reader.onload = async () => {
+      try { await saveProfile({ logo: reader.result }); setProfileError(''); }
+      catch { setProfileError(t('Only the account owner can change the agency profile.')); }
     };
     reader.readAsDataURL(file);
   }
@@ -226,43 +224,44 @@ export default function Settings() {
   function exportCandidates() {
     downloadCsv(
       'roster-candidates.csv',
-      ['Name', 'Email', 'Phone', 'Current Title', 'Current Employer', 'Skills', 'Source', 'Owner'],
+      [t('Name'), t('Email'), t('Phone'), t('Current Title'), t('Current Employer'), t('Skills'), t('Source'), t('Owner')],
       candidates.map((c) => [c.name, c.email, c.phone, c.current_title, c.current_employer, c.skills, c.source, c.owner_name])
     );
   }
   function exportJobs() {
     downloadCsv(
       'roster-jobs.csv',
-      ['Title', 'Client', 'Type', 'Pay Range', 'Location', 'Status', 'Owner'],
+      [t('Title'), t('Client'), t('Type'), t('Pay Range'), t('Location'), t('Status'), t('Owner')],
       jobs.map((j) => [j.title, j.client_name, j.employment_type, j.pay_range, j.location, j.status, j.owner_name])
     );
   }
   function exportClients() {
     downloadCsv(
       'roster-clients.csv',
-      ['Company', 'Industry', 'Contact', 'Email', 'Phone', 'Status', 'Owner'],
+      [t('Company'), t('Industry'), t('Contact'), t('Email'), t('Phone'), t('Status'), t('Owner')],
       clients.map((c) => [c.company_name, c.industry, c.contact_name, c.contact_email, c.contact_phone, c.status, c.owner_name])
     );
   }
   function exportPlacements() {
     downloadCsv(
       'roster-placements.csv',
-      ['Candidate', 'Client', 'Job', 'Start', 'End', 'Fee', 'Status'],
+      [t('Candidate'), t('Client'), t('Job'), t('Start'), t('End'), t('Fee'), t('Status')],
       placements.map((p) => [p.candidate_name, p.client_name, p.job_title, p.start_date, p.end_date || '', p.placement_fee, p.status])
     );
   }
 
   return (
-    <Layout title="Settings">
+    <Layout title={t('Settings')}>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <PlanCard />
         <MyAccountCard />
         {account?.role === 'owner' && <StaffCard />}
         <Card className="p-1">
           <CardHead
-            title="Agency Profile"
+            title={t('Agency Profile')}
             action={
-              editingProfile ? null : (
-                <IconButton icon="pencil" title="Edit profile" onClick={startEditProfile} />
+              editingProfile || !owner ? null : (
+                <IconButton icon="pencil" title={t('Edit profile')} onClick={startEditProfile} />
               )
             }
           />
@@ -272,7 +271,8 @@ export default function Settings() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    title="Change logo"
+                    title={owner ? t('Change logo') : undefined}
+                    disabled={!owner}
                     onClick={() => fileRef.current && fileRef.current.click()}
                     className="relative flex-shrink-0 rounded-lg group"
                   >
@@ -280,7 +280,7 @@ export default function Settings() {
                       <img src={logo} alt={profile.name} width={44} height={44} className="rounded-lg object-cover w-11 h-11" />
                     ) : (
                       <span className="w-11 h-11 rounded-lg bg-brandTint text-brand flex items-center justify-center font-display font-bold">
-                        {profile.name.slice(0, 1)}
+                        {(profile.name || 'R').slice(0, 1)}
                       </span>
                     )}
                     <span className="absolute inset-0 rounded-lg bg-black/0 group-hover:bg-black/40 flex items-center justify-center transition-colors">
@@ -290,39 +290,49 @@ export default function Settings() {
                     </span>
                   </button>
                   <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickLogo} />
-                  <p className="font-semibold text-ink">{profile.name}</p>
+                  <p className="font-semibold text-ink">{profile.name || t('Your agency')}</p>
                 </div>
                 <p className="text-muted flex items-center gap-2"><Icon name="building" size={14} /> {profile.address}</p>
                 <p className="text-muted flex items-center gap-2"><Icon name="phoneCall" size={14} /> {profile.phone}</p>
                 <p className="text-muted flex items-center gap-2"><Icon name="mail" size={14} /> {profile.email}</p>
                 <p className="text-muted flex items-center gap-2"><Icon name="target" size={14} /> {profile.description}</p>
+                {!profile.address && !profile.phone && !profile.email && !profile.description && (
+                  <p className="text-muted" data-testid="profile-empty">{owner ? t('Add your agency details with the pencil above.') : t('The owner has not added the agency details yet.')}</p>
+                )}
+                {profileError && <p className="text-sm text-rose" role="alert">{profileError}</p>}
                 {profileSaved && (
                   <p className="text-sm text-green bg-greenTint border border-green/30 rounded-md px-3 py-2 flex items-center gap-1.5">
-                    <Icon name="check" size={14} /> Profile saved
-                  </p>
+                    <Icon name="check" size={14} /> {t('Profile saved')}</p>
                 )}
               </div>
             )}
             {editingProfile && (
               <div>
-                <Field label="Company name">
+                <Field label={t('Company name')}>
                   <TextInput value={draftProfile.name} onChange={(e) => setDraftProfile((v) => ({ ...v, name: e.target.value }))} />
                 </Field>
-                <Field label="Address">
+                <Field label={t('Address')}>
                   <TextInput value={draftProfile.address} onChange={(e) => setDraftProfile((v) => ({ ...v, address: e.target.value }))} />
                 </Field>
-                <Field label="Phone">
+                <Field label={t('Phone')}>
                   <TextInput value={draftProfile.phone} onChange={(e) => setDraftProfile((v) => ({ ...v, phone: e.target.value }))} />
                 </Field>
-                <Field label="Email">
+                <Field label={t('Email')}>
                   <TextInput value={draftProfile.email} onChange={(e) => setDraftProfile((v) => ({ ...v, email: e.target.value }))} />
                 </Field>
-                <Field label="Description">
+                <Field label={t('Description')}>
                   <TextArea value={draftProfile.description} onChange={(e) => setDraftProfile((v) => ({ ...v, description: e.target.value }))} />
                 </Field>
+                <Field label={t('Online payment link')} hint={t('Optional. Your own payment page (Stripe Payment Link, Square, PayPal…). It becomes the “Pay online” button on invoices.')}>
+                  <TextInput value={draftProfile.payment_url || ''} placeholder="https://" onChange={(e) => setDraftProfile((v) => ({ ...v, payment_url: e.target.value }))} data-testid="profile-payment-url" />
+                </Field>
+                <Field label={t('Payment instructions')} hint={t('Shown on invoices, for example “Net 15. ACH details on request.”')}>
+                  <TextArea value={draftProfile.payment_note || ''} onChange={(e) => setDraftProfile((v) => ({ ...v, payment_note: e.target.value }))} />
+                </Field>
+                {profileError && <p className="text-sm text-rose mb-2" role="alert">{profileError}</p>}
                 <div className="flex items-center justify-end gap-2 pt-1">
-                  <Button variant="outline" size="sm" onClick={cancelEditProfile}>Cancel</Button>
-                  <Button size="sm" onClick={saveProfile}>Save</Button>
+                  <Button variant="outline" size="sm" onClick={cancelEditProfile}>{t('Cancel')}</Button>
+                  <Button size="sm" onClick={submitProfile}>{t('Save')}</Button>
                 </div>
               </div>
             )}
@@ -330,7 +340,7 @@ export default function Settings() {
         </Card>
 
         <Card className="p-1">
-          <CardHead title="Team" sub={users ? `${users.length} recruiters & staff` : ''} />
+          <CardHead title={t('Team')} sub={users ? t('{n} recruiters & staff', { n: users.length }) : ''} />
           <div className="divide-y divide-lineSoft max-h-[360px] overflow-y-auto">
             {!users && <Spinner />}
             {users && users.map((u) => (
@@ -347,86 +357,95 @@ export default function Settings() {
         </Card>
 
         <Card className="p-1">
-          <CardHead title="Notifications" sub="Persisted locally in this browser" />
-          <div className="divide-y divide-lineSoft">
-            {NOTIFICATION_ITEMS.map((n) => (
-              <div key={n.key} className="flex items-center justify-between px-5 py-3.5 gap-4">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-ink">{n.label}</p>
-                  <p className="text-xs text-muted mt-0.5">{n.desc}</p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={notifications[n.key]}
-                  onClick={() => toggleNotification(n.key)}
-                  className={`relative flex-shrink-0 w-10 h-6 rounded-full transition-colors ${notifications[n.key] ? 'bg-brand' : 'bg-line'}`}
-                >
-                  <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${notifications[n.key] ? 'translate-x-4' : ''}`}
-                  />
-                </button>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="p-1">
           <CardHead
-            title="WhatsApp Business"
-            sub="One shared number for the whole team"
+            title={t('WhatsApp Business')}
+            sub={t('One shared number for the whole team')}
             action={
               waStatus && waStatus.connected ? (
                 <Button variant="outline" size="sm" onClick={disconnectWhatsApp} disabled={waBusy}>
-                  {waBusy ? 'Disconnecting…' : 'Disconnect'}
+                  {waBusy ? t('Disconnecting…') : t('Disconnect')}
                 </Button>
               ) : (
-                <Button size="sm" onClick={() => setWaModalOpen(true)}>Connect</Button>
+                <Button size="sm" onClick={() => setWaModalOpen(true)}>{t('Connect')}</Button>
               )
             }
           />
           <div className="px-5 pb-5 text-sm">
-            {!waStatus && <p className="text-muted">Checking connection…</p>}
+            {!waStatus && <p className="text-muted">{t('Checking connection…')}</p>}
             {waStatus && waStatus.connected && (
               <div className="flex items-center gap-2.5">
                 <span className="w-8 h-8 rounded-lg bg-greenTint text-green flex items-center justify-center flex-shrink-0">
                   <Icon name="phoneCall" size={15} />
                 </span>
                 <div>
-                  <p className="font-semibold text-ink">Connected</p>
-                  <p className="text-xs text-muted">{waStatus.displayPhone || 'WhatsApp Business number'}</p>
+                  <p className="font-semibold text-ink">{t('Connected')}</p>
+                  <p className="text-xs text-muted">{waStatus.displayPhone || t('WhatsApp Business number')}</p>
                 </div>
               </div>
             )}
             {waStatus && !waStatus.connected && (
-              <p className="text-muted">Not connected — paste your Meta WhatsApp Business credentials to start sending and receiving messages from the WhatsApp page.</p>
+              <p className="text-muted">{t('Not connected — paste your Meta WhatsApp Business credentials to start sending and receiving messages from the WhatsApp page.')}</p>
+            )}
+          </div>
+        </Card>
+
+        <OfficesCard />
+        <ConnectionsCard />
+        <DeveloperCard />
+
+        <Card className="p-1" data-testid="sms-card">
+          <CardHead
+            title={t('SMS (Twilio)')}
+            sub={t('Text candidates from your own Twilio number')}
+            action={
+              !owner ? null : smsStatus && smsStatus.connected ? (
+                <Button variant="outline" size="sm" onClick={disconnectSms} disabled={smsBusy}>{smsBusy ? t('Disconnecting…') : t('Disconnect')}</Button>
+              ) : (
+                <Button size="sm" onClick={() => setSmsModal(true)} data-testid="sms-connect-open">{t('Connect')}</Button>
+              )
+            }
+          />
+          <div className="px-5 pb-5 text-sm">
+            {!smsStatus && <p className="text-muted">{t('Checking connection…')}</p>}
+            {smsStatus && smsStatus.connected && (
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-lg bg-greenTint text-green flex items-center justify-center flex-shrink-0"><Icon name="phoneCall" size={15} /></span>
+                <div>
+                  <p className="font-semibold text-ink">{t('Connected')}</p>
+                  <p className="text-xs text-muted">{smsStatus.from_number}</p>
+                </div>
+              </div>
+            )}
+            {smsStatus && !smsStatus.connected && (
+              <p className="text-muted">{t('Not connected. Paste your Twilio Account SID, Auth Token and phone number to send texts from the Candidates page.')}</p>
             )}
           </div>
         </Card>
 
         <Card className="p-1">
-          <CardHead title="Data Export" sub="Download CSVs of your core records" />
+          <CardHead title={t('Data Export')} sub={t('Download CSVs of your core records')} />
           <div className="divide-y divide-lineSoft">
             <div className="flex items-center justify-between px-5 py-3.5">
-              <span className="text-sm text-ink">Candidates ({candidates.length})</span>
-              <Button variant="outline" size="sm" onClick={exportCandidates}><Icon name="download" size={13} /> Export</Button>
+              <span className="text-sm text-ink">{t('Candidates')} ({candidates.length})</span>
+              <Button variant="outline" size="sm" onClick={exportCandidates}><Icon name="download" size={13} /> {t('Export')}</Button>
             </div>
             <div className="flex items-center justify-between px-5 py-3.5">
-              <span className="text-sm text-ink">Jobs ({jobs.length})</span>
-              <Button variant="outline" size="sm" onClick={exportJobs}><Icon name="download" size={13} /> Export</Button>
+              <span className="text-sm text-ink">{t('Jobs')} ({jobs.length})</span>
+              <Button variant="outline" size="sm" onClick={exportJobs}><Icon name="download" size={13} /> {t('Export')}</Button>
             </div>
             <div className="flex items-center justify-between px-5 py-3.5">
-              <span className="text-sm text-ink">Clients ({clients.length})</span>
-              <Button variant="outline" size="sm" onClick={exportClients}><Icon name="download" size={13} /> Export</Button>
+              <span className="text-sm text-ink">{t('Clients')} ({clients.length})</span>
+              <Button variant="outline" size="sm" onClick={exportClients}><Icon name="download" size={13} /> {t('Export')}</Button>
             </div>
             <div className="flex items-center justify-between px-5 py-3.5">
-              <span className="text-sm text-ink">Placements ({placements.length})</span>
-              <Button variant="outline" size="sm" onClick={exportPlacements}><Icon name="download" size={13} /> Export</Button>
+              <span className="text-sm text-ink">{t('Placements')} ({placements.length})</span>
+              <Button variant="outline" size="sm" onClick={exportPlacements}><Icon name="download" size={13} /> {t('Export')}</Button>
             </div>
           </div>
         </Card>
       </div>
 
+      {smsModal && <SmsConnectForm webhookUrl={smsStatus?.webhook_url} onClose={() => setSmsModal(false)} onConnected={() => { setSmsModal(false); refreshSms(); }} />}
       {waModalOpen && <WhatsAppConnectForm onClose={() => setWaModalOpen(false)} onConnected={onWhatsAppConnected} />}
     </Layout>
   );

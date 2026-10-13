@@ -1,19 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import Icon from './Icon.jsx';
+import api from '../api.js';
 
-const READ_KEY = 'roster-notifications-read';
+import { useT } from '../auth/i18n.js';
+const READ_KEY = 'roster-alerts-seen';
 
+// The bell lists the latest alerts written by the automations (Activity log, type "Automation").
 export default function Topbar({ title, count, actions }) {
+  const { t } = useT();
   const [open, setOpen] = useState(false);
-  const [unread, setUnread] = useState(true);
+  const [alerts, setAlerts] = useState([]);
+  const [seen, setSeen] = useState(() => { try { return localStorage.getItem(READ_KEY) || ''; } catch { return ''; } });
   const panelRef = useRef(null);
 
   useEffect(() => {
-    try {
-      setUnread(localStorage.getItem(READ_KEY) !== '1');
-    } catch {
-      // ignore
-    }
+    api.activities().then((rows) => setAlerts((rows || []).filter((a) => a.type === 'Automation').slice(0, 8))).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -24,15 +25,14 @@ export default function Topbar({ title, count, actions }) {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
+  const newest = alerts.reduce((m, a) => (String(a.occurred_at) > m ? String(a.occurred_at) : m), '');
+  const unread = !!newest && newest > seen;
+
   function toggleBell() {
     setOpen((o) => !o);
     if (unread) {
-      setUnread(false);
-      try {
-        localStorage.setItem(READ_KEY, '1');
-      } catch {
-        // ignore
-      }
+      setSeen(newest);
+      try { localStorage.setItem(READ_KEY, newest); } catch { /* ignore */ }
     }
   }
 
@@ -45,29 +45,24 @@ export default function Topbar({ title, count, actions }) {
         )}
       </div>
       <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end ml-auto">
-        <div className="hidden md:flex items-center gap-2 bg-wash rounded-lg px-3 py-1.5 w-64">
-          <Icon name="search" size={15} stroke="#9498B3" />
-          <input
-            placeholder="Search Roster…"
-            className="bg-transparent text-sm outline-none placeholder:text-faint w-full"
-            readOnly
-          />
-        </div>
         {actions}
         <div className="relative" ref={panelRef}>
           <button
             type="button"
             onClick={toggleBell}
-            title="Notifications"
+            title={t('Notifications')}
             className="relative text-muted hover:text-ink transition-colors"
           >
             <Icon name="bell" size={19} />
             {unread && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-coral" />}
           </button>
           {open && (
-            <div className="absolute right-0 top-8 z-40 w-64 bg-surface border border-line rounded-lg shadow-lg py-3 px-4">
-              <p className="text-xs font-semibold text-ink mb-1">Notifications</p>
-              <p className="text-xs text-muted">You're all caught up.</p>
+            <div className="absolute right-0 top-8 z-40 w-72 max-w-[calc(100vw-2rem)] bg-surface border border-line rounded-lg shadow-lg py-3 px-4" data-testid="alerts-panel">
+              <p className="text-xs font-semibold text-ink mb-1">{t('Notifications')}</p>
+              {alerts.length === 0 && <p className="text-xs text-muted">{t('You\'re all caught up.')}</p>}
+              <ul className="space-y-2 max-h-72 overflow-y-auto">
+                {alerts.map((a) => <li key={a.id} className="text-xs text-ink border-t border-lineSoft pt-2 first:border-0 first:pt-0">{a.subject}</li>)}
+              </ul>
             </div>
           )}
         </div>

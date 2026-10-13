@@ -1,7 +1,7 @@
 // Per-product bits the shared sign-in screens need.
 export const BRAND = {
   name: 'Roster',
-  tagline: 'Crestline Talent Partners',
+  tagline: 'Staffing CRM',
   storageKey: 'roster-crm-session',
   langKey: 'roster-lang',
   titleFont: 'font-display',

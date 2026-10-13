@@ -52,7 +52,106 @@ function del(path) {
   return fetch(BASE + path, { method: 'DELETE', headers: authHeaders() }).then(handle);
 }
 
+// Public calls of the client portal (no login: the private link is the key). A 401 here must not sign anyone out.
+async function portalHandle(r) {
+  const data = await r.json().catch(() => null);
+  if (!r.ok) throw Object.assign(new Error((data && data.error) || `Request failed (${r.status})`), { status: r.status, code: data?.code });
+  return data;
+}
+const portalGet = (path) => fetch(`${BASE}/portal/${path}`).then(portalHandle);
+const portalPost = (path, body) => fetch(`${BASE}/portal/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then(portalHandle);
+export const portalApi = {
+  load: (token) => portalGet(encodeURIComponent(token)),
+  feedback: (token, body) => portalPost(`${encodeURIComponent(token)}/feedback`, body),
+  approve: (token, id, body) => portalPost(`${encodeURIComponent(token)}/timesheets/${id}/approve`, body),
+  dispute: (token, id, body) => portalPost(`${encodeURIComponent(token)}/timesheets/${id}/dispute`, body),
+  invoice: (token, id) => portalGet(`${encodeURIComponent(token)}/invoices/${id}`),
+};
+
+// Downloads a file from an authenticated GET (CSV export) as a Blob.
+export async function downloadAuthed(path, filename) {
+  const r = await fetch(BASE + path, { headers: authHeaders() });
+  if (r.status === 401) handleUnauthorized();
+  if (!r.ok) { const d = await r.json().catch(() => null); throw Object.assign(new Error(d?.error || `Request failed (${r.status})`), { status: r.status, code: d?.code }); }
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+async function upload(path, form) {
+  const r = await fetch(BASE + path, { method: 'POST', headers: authHeaders(), body: form });
+  return handle(r);
+}
+
 export const api = {
+  // ---- Etapa 3: plano Completo ----
+  aiStatus: () => get('/ai/status'),
+  aiCandidateSummary: (body) => post('/ai/candidate-summary', body),
+  aiJobDescription: (body) => post('/ai/job-description', body),
+  jobSuggestions: (id) => get(`/jobs/${id}/suggestions`),
+  documentMeta: () => get('/documents/meta'),
+  candidateDocuments: (id) => get(`/candidates/${id}/documents`),
+  createDocument: (id, body) => post(`/candidates/${id}/documents`, body),
+  updateDocument: (id, body) => put(`/documents/${id}`, body),
+  deleteDocument: (id) => del(`/documents/${id}`),
+  signatureStatus: () => get('/signatures/status'),
+  signatures: (kind, id) => get(`/signatures?kind=${kind}&related_id=${id}`),
+  signatureDefaults: (kind, id) => get(`/signatures/defaults?kind=${kind}&related_id=${id}`),
+  sendSignature: (form) => upload('/signatures', form),
+  refreshSignature: (id) => post(`/signatures/${id}/refresh`, {}),
+  deleteSignature: (id) => del(`/signatures/${id}`),
+  offices: () => get('/offices'),
+  createOffice: (body) => post('/offices', body),
+  updateOffice: (id, body) => put(`/offices/${id}`, body),
+  deleteOffice: (id) => del(`/offices/${id}`),
+  setUserOffice: (id, office_id) => put(`/users/${id}/office`, { office_id }),
+  apiKeys: () => get('/api-keys'),
+  createApiKey: (name) => post('/api-keys', { name }),
+  deleteApiKey: (id) => del(`/api-keys/${id}`),
+  webhooks: () => get('/webhooks'),
+  webhookEvents: () => get('/webhooks/events'),
+  createWebhook: (body) => post('/webhooks', body),
+  setWebhookActive: (id, active) => patch(`/webhooks/${id}`, { active }),
+  deleteWebhook: (id) => del(`/webhooks/${id}`),
+  testWebhook: (id) => post(`/webhooks/${id}/test`, {}),
+  webhookDeliveries: (id) => get(`/webhooks/${id}/deliveries`),
+  // ---- Etapa 2: portal do cliente, fatura, mensagens ----
+  clientPortal: (id) => get(`/clients/${id}/portal`),
+  clientPortalAction: (id, action) => post(`/clients/${id}/portal/${action}`, {}),
+  timesheetInvoice: (id) => get(`/timesheets/${id}/invoice`),
+  sendInvoice: (id) => post(`/timesheets/${id}/send-invoice`, {}),
+  messageTemplates: () => get('/message-templates'),
+  createMessageTemplate: (body) => post('/message-templates', body),
+  deleteMessageTemplate: (id) => del(`/message-templates/${id}`),
+  candidateMessages: (id) => get(`/candidates/${id}/messages`),
+  previewMessage: (id, body) => post(`/candidates/${id}/messages/preview`, body),
+  sendMessage: (id, body) => post(`/candidates/${id}/messages`, body),
+  smsStatus: () => get('/integrations/sms/status'),
+  smsConnect: (body) => post('/integrations/sms/connect', body),
+  smsDisconnect: () => post('/integrations/sms/disconnect', {}),
+
+  // ---- Importar de foto (a IA lê a imagem; nada é guardado no servidor) ----
+  photoApi: {
+    status: () => get('/photo-import/status'),
+    setCredit: (body) => put('/photo-import/credit', body),
+    read: async (file, kind, lang) => {
+      const form = new FormData();
+      form.append('kind', kind); form.append('lang', lang); form.append('file', file, file.name || 'photo.jpg');
+      const res = await fetch(`${BASE}/photo-import`, { method: 'POST', headers: authHeaders(), body: form });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) handleUnauthorized();
+      if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { code: data.code, status: res.status });
+      return data;
+    },
+  },
+  // ---- Planos, cobranca, perfil da agencia ----
+  billingStatus: () => get('/billing/status'),
+  billingCheckout: (plan, interval) => post('/billing/checkout', { plan, interval }),
+  billingPortal: () => post('/billing/portal', {}),
+  companyProfile: () => get('/company-profile'),
+  saveCompanyProfile: (body) => put('/company-profile', body),
+  parseResume: (text) => post('/candidates/parse-resume', { text }),
+  automationCatalog: () => get('/automations/catalog'),
+  runAutomationsNow: () => post('/automations/run-now', {}),
   dashboard: () => get('/dashboard'),
   reports: () => get('/reports'),
 

@@ -1,7 +1,11 @@
 {
-  "name": "Roster — Crestline Talent Partners",
+  "name": "Roster — Staffing CRM",
   "short_name": "Roster",
-  "description": "ATS + CRM for Crestline Talent Partners recruiters and account managers.",
+  "description": "Applicant tracking and CRM for staffing agencies: clients, jobs, candidates, pipeline, placements, timesheets and WhatsApp.",
+  "scope": "/",
+  "orientation": "any",
+  "lang": "en",
+  "categories": ["business", "productivity"],
   "start_url": "/",
   "id": "/",
   "display": "standalone",

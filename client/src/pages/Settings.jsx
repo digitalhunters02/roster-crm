@@ -12,6 +12,7 @@ import { MyAccountCard, StaffCard } from '../auth/AccountPanel.jsx';
 import { useT } from '../auth/i18n.js';
 import PlanCard from '../billing/PlanCard.jsx';
 import { OfficesCard, ConnectionsCard, DeveloperCard } from '../components/CompleteSettings.jsx';
+import RexConnectorCard from '../components/RexConnectorCard.jsx';
 import { useProfile, saveProfile } from '../profile/useProfile.js';
 function SmsConnectForm({ webhookUrl, onClose, onConnected }) {
   const { t } = useT();
@@ -392,6 +393,7 @@ export default function Settings() {
         <OfficesCard />
         <ConnectionsCard />
         <DeveloperCard />
+        <RexConnectorCard />
 
         <Card className="p-1" data-testid="sms-card">
           <CardHead

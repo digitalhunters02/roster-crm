@@ -1,6 +1,7 @@
 import { UI_STRINGS } from '../i18n/uiStrings.js';
 import { ETAPA2_STRINGS } from '../i18n/etapa2Strings.js';
 import { ETAPA3_STRINGS } from '../i18n/etapa3Strings.js';
+import { REX_CONNECTOR_STRINGS } from '../i18n/rexConnectorStrings.js';
 // Sign-in / account strings in English, Portuguese and Spanish.
 // Placeholders like {name} are filled by t(key, { name }).
 export const AUTH_STRINGS = {
@@ -214,3 +215,4 @@ Object.assign(AUTH_STRINGS.pt, ETAPA2_STRINGS.pt);
 Object.assign(AUTH_STRINGS.es, ETAPA2_STRINGS.es);
 // etapa 3 only fills what is still missing (it must never overwrite an older, identical key)
 for (const lang of ['pt', 'es']) for (const [k, v] of Object.entries(ETAPA3_STRINGS[lang])) if (AUTH_STRINGS[lang][k] === undefined) AUTH_STRINGS[lang][k] = v;
+for (const lang of ['pt', 'es']) for (const [k, v] of Object.entries(REX_CONNECTOR_STRINGS[lang])) if (AUTH_STRINGS[lang][k] === undefined) AUTH_STRINGS[lang][k] = v;

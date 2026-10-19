@@ -328,3 +328,31 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_hook ON webhook_deliveries (webhook_id, id DESC);
+
+-- Conector opcional com o Rex (desligado por padrão): manda as faturas de horas para o financeiro do dono.
+CREATE TABLE IF NOT EXISTS connector_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  base_url TEXT,
+  api_key TEXT,
+  app_url TEXT,
+  remote_json TEXT,
+  auth_failed_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS connector_sync (
+  timesheet_id INTEGER PRIMARY KEY REFERENCES timesheets_invoices(id) ON DELETE CASCADE,
+  remote_id TEXT,
+  paid_synced INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  updated_at TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS connector_log (
+  id SERIAL PRIMARY KEY,
+  timesheet_id INTEGER,
+  action TEXT,
+  ok INTEGER NOT NULL,
+  message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

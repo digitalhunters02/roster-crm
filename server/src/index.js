@@ -22,6 +22,7 @@ import { mountMessaging, mountSmsWebhook } from './messaging.js';
 import { mountSignatures, startSignaturePoller } from './signatures.js';
 import { mountTools } from './tools.js';
 import { mountPublicApi, mountIntegrationsAdmin, emit as emitWebhook } from './integrations.js';
+import { mountConnector, queueSync as queueRexSync, startConnectorRetry } from './connector.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', '..', 'client', 'dist');
@@ -687,6 +688,7 @@ app.post('/api/timesheets', ar(async (req, res) => {
     placement_id: b.placement_id, period_start: b.period_start, period_end: b.period_end,
     hours: Number(b.hours) || 0, amount: await timesheetAmount(b, b.placement_id), status: b.status,
   });
+  queueRexSync(info.rows[0].id);
   res.status(201).json(await timesheetRow(info.rows[0].id));
 }));
 
@@ -712,6 +714,7 @@ app.put('/api/timesheets/:id', ar(async (req, res) => {
   if (Number(existing.hours) !== (Number(b.hours) || 0) || Number(existing.amount) !== amount) {
     await run(`UPDATE timesheets_invoices SET client_approved_at = NULL, client_approved_by = NULL WHERE id = ?`, req.params.id);
   }
+  queueRexSync(req.params.id);
   res.json(await timesheetRow(req.params.id));
 }));
 
@@ -750,6 +753,7 @@ app.post('/api/timesheets/:id/send-invoice', blockDemo, ar(async (req, res) => {
   await run(`UPDATE timesheets_invoices SET invoice_sent_at = now(), status = CASE WHEN status = 'Draft' THEN 'Sent' ELSE status END WHERE id = ?`, t.id);
   const after = await timesheetRow(t.id);
   if (after.status !== t.status) emitWebhook('timesheet.status_changed', { id: t.id, previous_status: t.status, status: after.status });
+  queueRexSync(t.id);
   res.json(after);
 }));
 
@@ -766,6 +770,7 @@ mountMessaging(app, ar, { requireOwner, blockDemo });
 mountSignatures(app, ar, { requirePlan, blockDemo });
 mountTools(app, ar, { requirePlan, blockDemo, requireOwner });
 mountIntegrationsAdmin(app, ar, { requirePlan, requireOwner, blockDemo });
+mountConnector(app, ar);
 
 app.get('/api/activities', ar(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 200);
@@ -1035,6 +1040,7 @@ initSchema()
     startDemoTrialScheduler();
     automationEngine.startAutomationScheduler();
     startSignaturePoller();
+    startConnectorRetry();
     setInterval(() => rollSampleDates().catch(() => {}), 6 * 60 * 60 * 1000).unref();
   })
   .catch((err) => {

@@ -4,6 +4,7 @@
 import crypto from 'node:crypto';
 import { get, all, run } from './db.js';
 import * as billing from './billing.js';
+import { blockInPreview } from './previewPlan.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ar = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -138,7 +139,7 @@ export function mountRosterPro(app) {
   }));
 
   // Lê o texto de um currículo e devolve os campos do candidato (IA da Anthropic; chave só no servidor).
-  app.post('/api/candidates/parse-resume', ar(async (req, res) => {
+  app.post('/api/candidates/parse-resume', blockInPreview, ar(async (req, res) => {
     const text = String(req.body?.text || '').replace(/\u0000/g, '').trim().slice(0, 20000);
     if (text.length < 40) return res.status(400).json({ error: 'Paste the resume text (at least a few lines).' });
     const key = process.env.ANTHROPIC_API_KEY;

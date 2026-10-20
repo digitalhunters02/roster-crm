@@ -9,7 +9,8 @@ import { requireAuth, requireOwner, bootstrapOwner } from './auth.js';
 import { publicAuthRoutes, accountRoutes } from './authRoutes.js';
 import { mountAdminSummary } from './adminSummary.js';
 import * as billing from './billing.js';
-import { mountBillingWebhook, mountBilling } from './billingRoutes.js';
+import { mountBillingWebhook, mountBilling, mountPublicPlans } from './billingRoutes.js';
+import { applyPreview, blockInPreview } from './previewPlan.js';
 import { mountRosterPublic, mountRosterPro } from './rosterPro.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,6 +51,7 @@ mountAdminSummary(app, ar, get, billing.getAdminSummary);
 
 // Stripe da Impact Digital chama este webhook direto (assinatura conferida em billing.js).
 mountBillingWebhook(app, ar);
+mountPublicPlans(app, ar);
 mountRosterPublic(app);
 
 // -------------------- WhatsApp webhook (public) --------------------
@@ -79,6 +81,8 @@ app.post('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
 
 // ==================== everything below requires a login ====================
 app.use('/api', requireAuth);
+// Dono da plataforma vendo o Roster como outro plano (X-Preview-Plan): só vale para e-mails em OWNER_EMAILS (previewPlan.js).
+app.use('/api', applyPreview);
 accountRoutes(app, ar);
 
 // Plano e cobrança: status para todos, escolher plano só o dono; depois, as barreiras por plano de cada rota.
@@ -635,7 +639,7 @@ app.get('/api/integrations/whatsapp/status', ar(async (req, res) => {
   res.json({ connected: !!conn, displayPhone: conn?.display_phone || null });
 }));
 
-app.post('/api/integrations/whatsapp/connect', requireOwner, ar(async (req, res) => {
+app.post('/api/integrations/whatsapp/connect', requireOwner, blockInPreview, ar(async (req, res) => {
   const { phoneNumberId, accessToken, businessAccountId, verifyToken } = req.body || {};
   if (!phoneNumberId || !accessToken) {
     return res.status(400).json({ error: 'Phone Number ID and Access Token are required.' });
@@ -648,7 +652,7 @@ app.post('/api/integrations/whatsapp/connect', requireOwner, ar(async (req, res)
   }
 }));
 
-app.post('/api/integrations/whatsapp/disconnect', requireOwner, ar(async (req, res) => {
+app.post('/api/integrations/whatsapp/disconnect', requireOwner, blockInPreview, ar(async (req, res) => {
   await whatsapp.disconnect();
   res.status(204).end();
 }));
@@ -661,7 +665,7 @@ app.get('/api/integrations/whatsapp/conversations/:phone', ar(async (req, res) =
   res.json(await whatsapp.getConversation(req.params.phone));
 }));
 
-app.post('/api/integrations/whatsapp/send', ar(async (req, res) => {
+app.post('/api/integrations/whatsapp/send', blockInPreview, ar(async (req, res) => {
   const { to, text } = req.body || {};
   if (!to || !text) return res.status(400).json({ error: 'to and text are required' });
   try {

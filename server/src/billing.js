@@ -5,8 +5,18 @@
 import crypto from 'node:crypto';
 import { get, run } from './db.js';
 import { PLAN_RANK, PLAN_LABELS, PLAN_PRICES, PLAN_USER_LIMITS, FEATURE_MIN_PLAN, API_GATES, PLAN_EXTRA_LIMITS } from './planConfig.js';
+import { store } from './owner.js';
+import { makeGates } from './planGates.js';
 
 export { PLAN_RANK, PLAN_LABELS, PLAN_PRICES, PLAN_USER_LIMITS, FEATURE_MIN_PLAN };
+
+// ---- SELO DE PLANO: mapa recurso -> plano mínimo, calculado do catálogo (planConfig.js) — o front só consome ----
+// PLANS_SOLD: os planos à venda; GATES: uma linha por recurso de FEATURE_MIN_PLAN (a função diz se o plano libera).
+// Para pôr selo em algo novo: uma linha em FEATURE_MIN_PLAN (planConfig.js) + o texto em client/src/planKit/planConfig.js.
+const PLANS_SOLD = Object.fromEntries(Object.keys(PLAN_RANK).map((key) => [key, { key, name: PLAN_LABELS[key], rank: PLAN_RANK[key], sold: true }]));
+const GATES = Object.fromEntries(Object.entries(FEATURE_MIN_PLAN).map(([feature, min]) => [feature, (p) => p.rank >= PLAN_RANK[min]]));
+const gates = makeGates(PLANS_SOLD, GATES, 'completo');
+export const { minPlanForGate, publicGates } = gates;
 
 const PRICE_ENV_BY_PLAN = { basico: 'STRIPE_PRICE_BASICO', essencial: 'STRIPE_PRICE_ESSENCIAL', completo: 'STRIPE_PRICE_COMPLETO' };
 // Anual: preço cobrado uma vez por ano, 10% abaixo de 12 mensalidades. Sem a variável, "Anual" não aparece.
@@ -61,6 +71,23 @@ export async function getSubscription() {
   return get(`SELECT * FROM subscription WHERE id = 1`);
 }
 
+// Plano que o dono está VENDO neste pedido (null fora da prévia).
+export function previewingPlan() {
+  const p = store.getStore()?.plan;
+  return p && PLAN_RANK[p] ? p : null;
+}
+
+// Plano de verdade da instalação (sem prévia).
+export async function realPlan() {
+  const licensed = licensedPlan();
+  if (licensed) return licensed;
+  if (!isConfigured()) return 'completo';
+  const sub = await getSubscription();
+  if (!sub.stripe_subscription_id) return 'completo';
+  if (!['active', 'trialing', 'past_due'].includes(sub.status)) return 'basico';
+  return PLAN_RANK[sub.plan] ? sub.plan : 'basico';
+}
+
 // Plano que o robô de provisionamento da Impact Digital grava (LICENSED_PLAN) em instalações de clientes.
 export function licensedPlan() {
   const p = process.env.LICENSED_PLAN;
@@ -70,14 +97,9 @@ export function licensedPlan() {
 // Plano em vigor. Só vale limite onde há cobrança de verdade: sem Stripe configurado, ou sem assinatura do
 // Stripe por trás (instância da Impact Digital, demonstração, instalação manual) tudo fica liberado,
 // para uma instalação nunca se trancar sozinha. LICENSED_PLAN sempre ganha.
+// Em "ver como plano" (dono da plataforma) vale o plano visto, só dentro daquele pedido.
 export async function effectivePlan() {
-  const licensed = licensedPlan();
-  if (licensed) return licensed;
-  if (!isConfigured()) return 'completo';
-  const sub = await getSubscription();
-  if (!sub.stripe_subscription_id) return 'completo';
-  if (!['active', 'trialing', 'past_due'].includes(sub.status)) return 'basico';
-  return PLAN_RANK[sub.plan] ? sub.plan : 'basico';
+  return previewingPlan() || realPlan();
 }
 
 export const planAllows = async (min) => PLAN_RANK[await effectivePlan()] >= PLAN_RANK[min];
@@ -121,6 +143,18 @@ export async function extraLimit(kind) {
   return table ? table[await effectivePlan()] : Infinity;
 }
 
+// Catálogo para o front: ordem, preço (mensal sempre; anual só quando o preço anual está ligado), limite de logins e o que cada plano ACRESCENTA.
+export function publicCatalog() {
+  const adds = gates.addsByPlan();
+  const yearly = yearlyPlans();
+  return Object.keys(PLAN_RANK).sort((a, b) => PLAN_RANK[a] - PLAN_RANK[b]).map((key) => ({
+    key, name: PLAN_LABELS[key], rank: PLAN_RANK[key],
+    price: { month: PLAN_PRICES[key], ...(yearly.includes(key) ? { year: annualPrice(key) } : {}) },
+    userLimit: Number.isFinite(PLAN_USER_LIMITS[key]) ? PLAN_USER_LIMITS[key] : null,
+    adds: adds[key] || [],
+  }));
+}
+
 export async function status() {
   const sub = await getSubscription();
   const plan = await effectivePlan();
@@ -143,6 +177,11 @@ export async function status() {
     paymentLinksYearly: getPaymentLinks('year'),
     yearlyPlans: yearlyPlans(),
     annualDiscount: ANNUAL_DISCOUNT,
+    // selo de plano (mesma fonte para o menu, os botões, a janelinha e os cartões de plano)
+    previewPlan: previewingPlan(),
+    realPlan: await realPlan(),
+    gates: publicGates(plan),
+    catalog: publicCatalog(),
   };
 }
 

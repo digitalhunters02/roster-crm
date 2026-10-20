@@ -8,6 +8,7 @@ import {
   accountByEmail, requireOwner, makeLimiter,
 } from './auth.js';
 import { sendPasswordResetEmail, isMailConfigured } from './mailer.js';
+import { blockInPreview } from './previewPlan.js';
 
 const WINDOW_MS = Number(process.env.AUTH_RATE_WINDOW_MS || 15 * 60 * 1000);
 const LOGIN_MAX = Number(process.env.LOGIN_MAX_ATTEMPTS || 5);
@@ -151,7 +152,7 @@ export function accountRoutes(app, ar) {
     res.json(rows.map(publicAccount));
   }));
 
-  app.post('/api/accounts', requireOwner, ar(async (req, res) => {
+  app.post('/api/accounts', requireOwner, blockInPreview, ar(async (req, res) => {
     const name = String(req.body?.name || '').trim();
     const email = normalizeEmail(req.body?.email);
     const password = req.body?.password;

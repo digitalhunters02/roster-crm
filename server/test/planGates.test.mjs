@@ -16,7 +16,7 @@ const DB_NAME = `selor_t_${crypto.randomBytes(4).toString('hex')}`;
 const DB_URL = ADMIN_URL.replace(/\/[^/]*$/, `/${DB_NAME}`);
 const PORT = 7882; // porta reservada para este trabalho; cada servidor de teste substitui o anterior
 process.env.DATABASE_URL ||= DB_URL; // billing.js abre o banco ao ser importado (nenhuma consulta é feita nos testes sem servidor)
-const { publicGates, publicCatalog, minPlanForGate } = await import('../src/billing.js');
+const { publicGates, publicCatalog, minPlanForGate, seatGateFor } = await import('../src/billing.js');
 const { makeGates } = await import('../src/planGates.js');
 const { isOwnerEmail } = await import('../src/owner.js');
 const OWNER = { email: 'dono@example.test', pass: 'Owner-pass-12345' };
@@ -26,6 +26,7 @@ const ORDER = ['basico', 'essencial', 'completo'];
 const MIN = {
   placements: 'essencial', timesheets: 'essencial', reports: 'essencial', careers: 'essencial', resume_ai: 'essencial',
   margin: 'completo', hours_export: 'completo', hours_portal: 'completo', automations: 'completo', whatsapp: 'completo',
+  staff_essencial: 'essencial', staff_completo: 'completo', // vagas de login de equipe (3 / 10 / sem limite)
 };
 const expectedLocked = (plan) => Object.entries(MIN).filter(([, min]) => ORDER.indexOf(min) > ORDER.indexOf(plan)).map(([k]) => k).sort();
 const lockedOf = (b) => Object.entries(b.gates).filter(([, v]) => v.locked).map(([k]) => k).sort();
@@ -53,6 +54,14 @@ test('catálogo: ordem, nomes, preços (anual só quando ligado), limites e o qu
   assert.deepEqual(cat[0].adds, []);
   assert.deepEqual(cat.flatMap((p) => p.adds).sort(), Object.keys(MIN).sort(), 'cada recurso entra em exatamente um plano');
   for (const p of cat) for (const g of p.adds) assert.equal(MIN[g], p.key, `${g} entra em ${p.key}`);
+});
+
+test('vaga de login: qual recurso destrava a próxima pessoa', () => {
+  assert.equal(seatGateFor('basico', 2), null);
+  assert.equal(seatGateFor('basico', 3), 'staff_essencial');
+  assert.equal(seatGateFor('essencial', 9), null);
+  assert.equal(seatGateFor('essencial', 10), 'staff_completo');
+  assert.equal(seatGateFor('completo', 999), null);
 });
 
 test('makeGates e OWNER_EMAILS', () => {

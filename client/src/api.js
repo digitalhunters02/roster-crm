@@ -1,4 +1,6 @@
 import { authHeaders, handleUnauthorized } from './auth/session.js';
+import { planCardStr } from './plans/planCardStrings.js';
+import { currentLang } from './auth/i18n.js';
 
 // In local dev, "/api" is proxied to the local server (see vite.config.js).
 // In production there's no such proxy, so VITE_API_URL must point at the
@@ -12,7 +14,8 @@ async function handle(r) {
   if (r.status === 204) return null;
   const data = await r.json().catch(() => null);
   if (!r.ok) {
-    const err = new Error((data && data.error) || `Request failed (${r.status})`);
+    // Prévia do dono ("Ver como plano"): a recusa de cobrança/IA/WhatsApp/novo login vem com este código; o texto sai no idioma da tela.
+    const err = new Error(data && data.code === 'preview_readonly' ? planCardStr(currentLang()).blocked : (data && data.error) || `Request failed (${r.status})`);
     err.status = r.status;
     err.body = data;
     throw err;

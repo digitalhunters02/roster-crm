@@ -6,7 +6,10 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { useT } from '../auth/i18n.js';
 import { LogOutIcon } from '../auth/AuthIcons.jsx';
 import { usePlan } from '../plans/PlanContext.jsx';
-import { LockIcon } from '../plans/PlanGate.jsx';
+import { usePlan as useKitPlan } from '../planKit/PlanBadge.jsx';
+import PlanBadge from '../planKit/PlanBadge.jsx';
+import PlanPreview from '../planKit/PlanPreview.jsx';
+import { NAV_GATES } from '../planKit/planConfig.js';
 
 const LOGO_KEY = 'roster-company-logo';
 
@@ -61,8 +64,9 @@ function BrandMark({ logo, size = 32 }) {
 
 export default function Sidebar() {
   const { account, logout } = useAuth();
-  const { t } = useT();
-  const { allows } = usePlan();
+  const { t, lang } = useT();
+  const { billing } = usePlan();
+  const kit = useKitPlan();
   const [logo, setLogo] = useState(null);
   const [open, setOpen] = useState(false);
 
@@ -137,14 +141,21 @@ export default function Sidebar() {
                 </p>
               )}
               <div className="space-y-0.5">
-                {group.items.map((item) => (
+                {group.items.map((item) => {
+                  // Selo de plano: o item continua no menu; se o plano atual não libera o recurso, ganha o selo e abre a janelinha.
+                  const gate = NAV_GATES[item.to.slice(1)];
+                  const locked = !!(gate && kit.enabled && kit.gates[gate] && kit.gates[gate].locked);
+                  return (
                   <NavLink
                     key={item.to}
                     to={item.to}
                     end={item.to === '/'}
-                    onClick={closeDrawer}
+                    data-nav={item.to.slice(1) || 'dashboard'}
+                    data-plan-locked={locked ? kit.gates[gate].minPlan : undefined}
+                    aria-haspopup={locked ? 'dialog' : undefined}
+                    onClick={(e) => { if (locked) { e.preventDefault(); closeDrawer(); kit.openGate(gate); } else closeDrawer(); }}
                     className={({ isActive }) =>
-                      `relative flex items-center gap-2.5 px-3 py-2 rounded-md text-[13.5px] font-semibold transition-colors ${
+                      `relative flex items-center gap-2.5 px-3 py-2 min-h-[40px] rounded-md text-[13.5px] font-semibold transition-colors ${
                         isActive ? 'bg-side2 text-white' : 'text-sideText hover:bg-side2/60 hover:text-white'
                       }`
                     }
@@ -155,17 +166,20 @@ export default function Sidebar() {
                           <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-coral" />
                         )}
                         <Icon name={item.icon} size={16} stroke={isActive ? '#B9AFF7' : '#8A82B8'} />
-                        {item.label}
-                        {item.feature && !allows(item.feature) && <LockIcon size={12} className="ml-auto text-sideMuted" />}
+                        <span className="min-w-0 flex-1">{item.label}</span>
+                        {locked && <PlanBadge gate={gate} style={{ marginLeft: 0 }} />}
                       </>
                     )}
                   </NavLink>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
         </nav>
 
+        {/* "Ver como plano": só para o dono da plataforma (OWNER_EMAILS no servidor). */}
+        {billing && <div className="px-3 pt-3 border-t border-sideLine text-sideText flex-shrink-0 empty:hidden [&>div]:!mb-0"><PlanPreview theme={{ accent: '#B9AFF7', light: false }} langKey={lang} me={billing} /></div>}
         <div className="px-4 py-3.5 border-t border-sideLine flex items-center gap-2.5 flex-shrink-0">
           <NavLink to="/settings" onClick={closeDrawer} title={t('accountTitle')} className="flex items-center gap-2.5 min-w-0 flex-grow">
             <Avatar name={account?.name || 'Roster'} color="#5B4EE0" size={30} />

@@ -3,29 +3,19 @@ import { api } from '../api.js';
 import { Card, CardHead, Badge, Button } from '../components/ui.jsx';
 import { usePlan } from './PlanContext.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { useT } from '../auth/i18n.js';
+import PlanBadge from '../planKit/PlanBadge.jsx';
+import { planStr, planFill, planMoney, gateText } from '../planKit/planStrings.js';
+import { planCardStr } from './planCardStrings.js';
 
 // Cartões de plano (mensal / anual -10%) + gerenciar assinatura. Só o dono escolhe plano.
-const BULLETS = {
-  "basico": [
-    "Candidates, jobs and pipeline",
-    "Clients and interviews",
-    "Dashboard and activities"
-  ],
-  "essencial": [
-    "Everything in Essential",
-    "Placements and timesheets",
-    "Reports"
-  ],
-  "completo": [
-    "Everything in Professional",
-    "Automations",
-    "WhatsApp inbox",
-    "Margin invoices and onboarding (coming with each release)"
-  ]
-};
+// Cada plano aparece com o SELO + preço; os recursos que ele ACRESCENTA em relação ao anterior (vindos do servidor) levam o selo do plano onde entram.
 
 export default function PlansCard() {
-  const { billing, refresh } = usePlan();
+  const { billing, refresh, names } = usePlan();
+  const { lang } = useT();
+  const ps = planStr(lang);
+  const cs = planCardStr(lang);
   const { account } = useAuth();
   const [interval, setIntervalV] = useState('month');
   const [busy, setBusy] = useState(null);
@@ -42,6 +32,7 @@ export default function PlansCard() {
   const yearlyOk = (billing.yearlyPlans || []).length > 0;
   const yearly = interval === 'year' && yearlyOk;
   const paid = billing.configured && billing.subscribedPlan && billing.status === 'active';
+  const previewing = !!billing.previewPlan; // o dono da plataforma está vendo como outro plano: nada de assinar nem gerenciar
 
   async function choose(plan) {
     setBusy(plan); setError('');
@@ -58,18 +49,21 @@ export default function PlansCard() {
   }
 
   const current = billing.plan;
-  const currentLabel = billing.plans.find((p) => p.id === current)?.label || current;
+  const nameOf = (id) => names?.[id] || billing.plans.find((p) => p.id === id)?.label || id;
+  const currentLabel = nameOf(current);
+  const catalog = billing.catalog || [];
   return (
     <Card id="billing" className="p-1">
       <CardHead
         title="Plan & billing"
         sub={billing.licensed ? `Your plan: ${currentLabel} · managed by Impact Digital (contact support to change it)` : billing.configured ? `Your plan: ${currentLabel}${billing.status !== 'active' ? ` (${billing.status})` : ''}` : 'Billing is not set up on this server, so every feature is unlocked.'}
-        action={isOwner && paid ? <Button variant="outline" size="sm" disabled={busy === 'manage'} onClick={manage}>{busy === 'manage' ? '…' : 'Manage subscription'}</Button> : null}
+        action={isOwner && paid && !previewing ? <Button variant="outline" size="sm" disabled={busy === 'manage'} onClick={manage}>{busy === 'manage' ? '…' : 'Manage subscription'}</Button> : null}
       />
       <div className="px-5 pb-5">
         <p className="text-xs text-muted mb-3">
           Staff logins: {billing.users}{billing.userLimit ? ` of ${billing.userLimit}` : ' (unlimited)'}
         </p>
+        {previewing && <p className="mb-3 text-xs text-brand font-semibold" data-testid="plans-preview-note">{planFill(ps.previewViewing, { app: 'Roster', plan: currentLabel })} {ps.previewBlocked}</p>}
         {error && <div className="mb-3 text-xs text-rose bg-roseTint border border-rose/30 rounded-lg px-3 py-2">{error}</div>}
         {yearlyOk && (
           <div className="flex gap-2 mb-4" role="group" aria-label="Billing period">
@@ -83,17 +77,29 @@ export default function PlansCard() {
           {billing.plans.map((p) => {
             const isCurrent = current === p.id;
             const price = yearly ? p.yearly : p.monthly;
-            const canBuy = isOwner && billing.configured && !billing.licensed && (p.available && (!yearly || billing.yearlyPlans.includes(p.id)));
+            const canBuy = !previewing && isOwner && billing.configured && !billing.licensed && (p.available && (!yearly || billing.yearlyPlans.includes(p.id)));
+            const ci = catalog.findIndex((c) => c.key === p.id);
+            const prev = ci > 0 ? catalog[ci - 1] : null;
+            const adds = ((ci >= 0 ? catalog[ci].adds : []) || []).filter((g) => gateText(g, lang));
             return (
-              <div key={p.id} className={`rounded-xl border p-4 flex flex-col ${isCurrent ? 'border-brand bg-brandTint/30' : 'border-line'}`}>
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-ink text-sm">{p.label}</span>
-                  {isCurrent && <Badge tone="brand">Current</Badge>}
+              <div key={p.id} data-plan-card={p.id} className={`rounded-xl border p-4 flex flex-col ${isCurrent ? 'border-brand bg-brandTint/30' : 'border-line'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-ink text-sm min-w-0">{nameOf(p.id)}<PlanBadge plan={p.id} /></span>
+                  {isCurrent && <Badge tone="brand">{cs.thisIsCurrent}</Badge>}
                 </div>
-                <div className="mt-1.5 text-2xl font-bold text-ink">${price.toLocaleString('en-US')}<span className="text-xs font-normal text-muted">{yearly ? '/year' : '/month'}</span></div>
+                <div className="mt-1.5 text-2xl font-bold text-ink" data-testid={`plan-price-${p.id}`}>{planMoney(price, lang, 'USD')}<span className="text-xs font-normal text-muted">{yearly ? cs.perYear : cs.perMonth}</span></div>
                 <ul className="mt-3 mb-4 space-y-1 text-xs text-muted flex-1">
-                  {(BULLETS[p.id] || []).map((b) => <li key={b}>• {b}</li>)}
-                  <li>• {p.userLimit ? `Up to ${p.userLimit} staff logins` : 'Unlimited staff logins'}</li>
+                  <li>• {p.userLimit ? planFill(cs.staffUpTo, { n: p.userLimit }) : cs.staffUnlimited}</li>
+                  {prev && adds.length > 0 && (
+                    <li data-plan-adds={p.id} className="list-none -ml-0 mt-2 pt-2 border-t border-lineSoft">
+                      <div className="text-[11px] text-faint mb-1">{planFill(ps.everythingIn, { prev: nameOf(prev.key) })}</div>
+                      <ul className="space-y-1 list-none p-0 m-0">
+                        {adds.map((g) => (
+                          <li key={g} data-add={g} className="flex flex-wrap items-center text-ink"><span className="min-w-0">{gateText(g, lang).name}</span><PlanBadge plan={p.id} /></li>
+                        ))}
+                      </ul>
+                    </li>
+                  )}
                 </ul>
                 {!isCurrent && (
                   <Button variant="brand" size="sm" className="justify-center" disabled={!canBuy || busy === p.id} onClick={() => choose(p.id)}>

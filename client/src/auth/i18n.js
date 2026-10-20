@@ -20,6 +20,9 @@ function initialLang() {
 let current = initialLang();
 const listeners = new Set();
 
+// Idioma atual da tela (para código fora de componentes, como api.js).
+export const currentLang = () => current;
+
 export function setLang(code) {
   if (!AUTH_STRINGS[code]) return;
   current = code;

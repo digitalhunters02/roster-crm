@@ -14,7 +14,21 @@ export { PLAN_RANK, PLAN_LABELS, PLAN_PRICES, PLAN_USER_LIMITS, FEATURE_MIN_PLAN
 // PLANS_SOLD: os planos à venda; GATES: uma linha por recurso de FEATURE_MIN_PLAN (a função diz se o plano libera).
 // Para pôr selo em algo novo: uma linha em FEATURE_MIN_PLAN (planConfig.js) + o texto em client/src/planKit/planConfig.js.
 const PLANS_SOLD = Object.fromEntries(Object.keys(PLAN_RANK).map((key) => [key, { key, name: PLAN_LABELS[key], rank: PLAN_RANK[key], sold: true }]));
-const GATES = Object.fromEntries(Object.entries(FEATURE_MIN_PLAN).map(([feature, min]) => [feature, (p) => p.rank >= PLAN_RANK[min]]));
+// Vagas de login de equipe: um recurso "staff_<plano>" para cada plano cujo limite de logins é maior que o do plano de baixo.
+const PLAN_KEYS = Object.keys(PLAN_RANK).sort((a, b) => PLAN_RANK[a] - PLAN_RANK[b]);
+const SEAT_GATES = Object.fromEntries(PLAN_KEYS.map((k, i) => [k, i > 0 && PLAN_USER_LIMITS[k] > PLAN_USER_LIMITS[PLAN_KEYS[i - 1]] ? `staff_${k}` : null]).filter(([, g]) => g).map(([k, g]) => [g, k]));
+const GATES = {
+  ...Object.fromEntries(Object.entries(FEATURE_MIN_PLAN).map(([feature, min]) => [feature, (p) => p.rank >= PLAN_RANK[min]])),
+  ...Object.fromEntries(Object.entries(SEAT_GATES).map(([gate, min]) => [gate, (p) => p.rank >= PLAN_RANK[min]])),
+};
+// Recurso que destrava mais um login de equipe quando as vagas do plano acabaram (null se ainda há vaga ou não há plano maior).
+export function seatGateFor(plan, used) {
+  const lim = PLAN_USER_LIMITS[plan];
+  if (!Number.isFinite(lim) || used < lim) return null;
+  const next = PLAN_KEYS.find((k) => PLAN_RANK[k] > PLAN_RANK[plan] && PLAN_USER_LIMITS[k] > used);
+  return next && SEAT_GATES_BY_PLAN[next] || null;
+}
+const SEAT_GATES_BY_PLAN = Object.fromEntries(Object.entries(SEAT_GATES).map(([g, k]) => [k, g]));
 const gates = makeGates(PLANS_SOLD, GATES, 'completo');
 export const { minPlanForGate, publicGates } = gates;
 
@@ -182,6 +196,7 @@ export async function status() {
     realPlan: await realPlan(),
     gates: publicGates(plan),
     catalog: publicCatalog(),
+    userGate: seatGateFor(plan, n),
   };
 }
 

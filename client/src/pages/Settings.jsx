@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api, { BASE } from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
@@ -10,9 +11,14 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { MyAccountCard, StaffCard } from '../auth/AccountPanel.jsx';
 import PlansCard from '../plans/PlansCard.jsx';
 import { usePlan } from '../plans/PlanContext.jsx';
+import PlanBadge, { usePlanGate } from '../planKit/PlanBadge.jsx';
+import { gateText, planStr } from '../planKit/planStrings.js';
+import { useT } from '../auth/i18n.js';
 
 function CareersLinkCard() {
   const { allows } = usePlan();
+  const { lang } = useT();
+  const gate = usePlanGate('careers');
   const on = allows('careers');
   const url = `${window.location.origin}/#/careers`;
   const [copied, setCopied] = useState(false);
@@ -28,7 +34,13 @@ function CareersLinkCard() {
               <a className="inline-flex items-center rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-wash" href={url} target="_blank" rel="noreferrer">Open page</a>
             </div>
           </>
-        ) : <p className="text-sm text-muted">Included in the Essential plan and above.</p>}
+        ) : (
+          // Selo de plano: o que o recurso faz + selo do plano mínimo; o botão abre a janelinha "Disponível no plano X".
+          <div data-plan-notice="careers" className="flex flex-wrap items-center gap-3">
+            <p className="flex-1 min-w-[200px] text-sm text-muted m-0">{gateText('careers', lang).what}<PlanBadge gate="careers" /></p>
+            <button type="button" onClick={gate.open} data-testid="careers-locked-open" className="inline-flex items-center min-h-[40px] px-3 rounded-lg border border-line bg-surface text-sm font-semibold text-ink hover:bg-wash">{planStr(lang).details}</button>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -151,6 +163,17 @@ function saveJson(key, value) {
 
 export default function Settings() {
   const { account } = useAuth();
+  // "Ver planos" da janelinha do selo de plano chega aqui com ?section=billing: rola até o cartão de planos assim que ele existe.
+  const [searchParams] = useSearchParams();
+  const wantedSection = searchParams.get('section');
+  const { billing: planBilling, allows } = usePlan();
+  const { lang } = useT();
+  const waGate = usePlanGate('whatsapp'); // WhatsApp: Complete. O cartão continua aqui; sem o plano, ganha o selo e abre a janelinha
+  useEffect(() => {
+    if (wantedSection !== 'billing' || !planBilling) return undefined;
+    const id = setTimeout(() => document.getElementById('billing')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 350);
+    return () => clearTimeout(id);
+  }, [wantedSection, planBilling]);
   const [users, setUsers] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -201,9 +224,14 @@ export default function Settings() {
     api.candidates().then(setCandidates);
     api.jobs().then(setJobs);
     api.clients().then(setClients);
-    api.placements().then(setPlacements);
-    refreshWhatsAppStatus();
   }, []);
+
+  // Só pede ao servidor o que o plano libera (placements: Professional, WhatsApp: Complete): evita pedidos recusados (402) e erro no console.
+  useEffect(() => {
+    if (!planBilling) return;
+    if (allows('placements')) api.placements().then(setPlacements);
+    if (allows('whatsapp')) refreshWhatsAppStatus();
+  }, [planBilling]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function startEditProfile() {
     setDraftProfile(profile);
@@ -408,13 +436,14 @@ export default function Settings() {
                   {waBusy ? 'Disconnecting…' : 'Disconnect'}
                 </Button>
               ) : (
-                <Button size="sm" onClick={() => setWaModalOpen(true)}>Connect</Button>
+                <Button size="sm" data-testid="whatsapp-connect" data-plan-locked={waGate.locked ? waGate.minPlan : undefined} className="min-h-[40px]" onClick={() => (waGate.locked ? waGate.open() : setWaModalOpen(true))}>Connect{waGate.locked && <PlanBadge gate="whatsapp" inherit />}</Button>
               )
             }
           />
           <div className="px-5 pb-5 text-sm">
-            {!waStatus && <p className="text-muted">Checking connection…</p>}
-            {waStatus && waStatus.connected && (
+            {waGate.locked && <p className="text-muted" data-plan-notice="whatsapp">{gateText('whatsapp', lang).what}</p>}
+            {!waGate.locked && !waStatus && <p className="text-muted">Checking connection…</p>}
+            {!waGate.locked && waStatus && waStatus.connected && (
               <div className="flex items-center gap-2.5">
                 <span className="w-8 h-8 rounded-lg bg-greenTint text-green flex items-center justify-center flex-shrink-0">
                   <Icon name="phoneCall" size={15} />
@@ -425,7 +454,7 @@ export default function Settings() {
                 </div>
               </div>
             )}
-            {waStatus && !waStatus.connected && (
+            {!waGate.locked && waStatus && !waStatus.connected && (
               <p className="text-muted">Not connected — paste your Meta WhatsApp Business credentials to start sending and receiving messages from the WhatsApp page.</p>
             )}
           </div>

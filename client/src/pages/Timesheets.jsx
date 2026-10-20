@@ -10,6 +10,9 @@ import { money, shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
 import { usePlan } from '../plans/PlanContext.jsx';
 import { LockIcon } from '../plans/PlanGate.jsx';
+import PlanBadge, { usePlanGate } from '../planKit/PlanBadge.jsx';
+import { gateText, planStr } from '../planKit/planStrings.js';
+import { useT } from '../auth/i18n.js';
 import { Link } from 'react-router-dom';
 
 const STATUS_TONE = { Draft: 'neutral', Sent: 'blue', Paid: 'green', Overdue: 'rose' };
@@ -71,6 +74,8 @@ function TimesheetForm({ initial, placements, onCancel, onSubmit, saving, error 
 
 function MarginCard() {
   const { allows } = usePlan();
+  const { lang } = useT();
+  const gate = usePlanGate('margin');
   const [m, setM] = useState(null);
   const [err, setErr] = useState(null);
   const on = allows('margin');
@@ -84,14 +89,16 @@ function MarginCard() {
     } catch (e) { setErr(e.message); }
   }
   if (!on) {
+    // Selo de plano: o cartão continua aqui, mostra o que o recurso faz e o selo do plano mínimo; o botão abre a janelinha.
+    const text = gateText('margin', lang);
     return (
-      <Card className="p-4 mb-4 flex flex-wrap items-center gap-3" data-testid="margin-locked">
+      <Card className="p-4 mb-4 flex flex-wrap items-center gap-3" data-testid="margin-locked" data-plan-notice="margin">
         <span className="w-9 h-9 rounded-full bg-brandTint text-brand flex items-center justify-center"><LockIcon size={16} /></span>
         <div className="flex-1 min-w-[200px]">
-          <div className="text-sm font-semibold text-ink">Margin per client, hours export and client approval link</div>
-          <div className="text-xs text-muted">See what you earn on every hour worked and let clients approve hours online. Included in the Complete plan.</div>
+          <div className="text-sm font-semibold text-ink">{text.name}<PlanBadge gate="margin" /></div>
+          <div className="text-xs text-muted">{text.what}</div>
         </div>
-        <Link to="/settings" className="text-sm font-semibold text-brand hover:underline">See plans</Link>
+        <button type="button" onClick={gate.open} data-testid="margin-locked-open" className="inline-flex items-center min-h-[40px] px-3 rounded-lg border border-line bg-surface text-sm font-semibold text-ink hover:bg-wash">{planStr(lang).details}</button>
       </Card>
     );
   }
@@ -144,7 +151,7 @@ function ApprovalLinkModal({ row, onClose }) {
 }
 
 export default function Timesheets() {
-  const { allows } = usePlan();
+  const portal = usePlanGate('hours_portal'); // link de aprovação do cliente: Completo
   const [linkRow, setLinkRow] = useState(null);
   const [rows, setRows] = useState(null);
   const [placements, setPlacements] = useState([]);
@@ -229,15 +236,19 @@ export default function Timesheets() {
     { key: 'hours', header: 'Hours', render: (r) => r.hours },
     { key: 'amount', header: 'Amount', render: (r) => <span className="font-medium">{money(r.amount)}</span> },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] || 'neutral'}>{r.status}</Badge> },
-    ...(allows('hours_portal') ? [{
+    {
       key: 'approval', header: 'Client',
       render: (r) => (
         <div className="flex items-center gap-2">
-          {r.approval_decision && <Badge tone={r.approval_decision === 'approved' ? 'green' : 'rose'}>{r.approval_decision === 'approved' ? 'Approved' : 'Rejected'}</Badge>}
-          <Button variant="ghost" size="sm" onClick={() => setLinkRow(r)}>{r.approval_decision ? 'New link' : 'Approval link'}</Button>
+          {portal.locked
+            ? <Button variant="ghost" size="sm" data-testid="approval-locked" data-plan-locked={portal.minPlan} onClick={portal.open}>Approval link<PlanBadge gate="hours_portal" /></Button>
+            : <>
+              {r.approval_decision && <Badge tone={r.approval_decision === 'approved' ? 'green' : 'rose'}>{r.approval_decision === 'approved' ? 'Approved' : 'Rejected'}</Badge>}
+              <Button variant="ghost" size="sm" onClick={() => setLinkRow(r)}>{r.approval_decision ? 'New link' : 'Approval link'}</Button>
+            </>}
         </div>
       ),
-    }] : []),
+    },
     {
       key: 'actions', header: '', className: 'w-20',
       render: (r) => <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />,

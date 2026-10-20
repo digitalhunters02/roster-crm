@@ -8,7 +8,7 @@ import {
 import Icon from '../components/Icon.jsx';
 import { shortDate } from '../format.js';
 import { downloadCsv } from '../csv.js';
-import { usePlan } from '../plans/PlanContext.jsx';
+import PlanBadge, { usePlanGate } from '../planKit/PlanBadge.jsx';
 
 const SOURCE_TONE = { 'Careers page': 'teal', LinkedIn: 'blue', Referral: 'green', 'Job Board': 'amber', Sourced: 'brand' };
 const SOURCE_OPTIONS = ['Careers page', 'LinkedIn', 'Referral', 'Job Board', 'Sourced'];
@@ -21,7 +21,7 @@ const EMPTY = {
 function CandidateForm({ initial, users, onCancel, onSubmit, saving, error }) {
   const [values, setValues] = useState(initial);
   const set = (k) => (e) => setValues((v) => ({ ...v, [k]: e.target.value }));
-  const { allows } = usePlan();
+  const ai = usePlanGate('resume_ai'); // IA do currículo: o botão continua aqui; sem o plano, ganha o selo e abre a janelinha
   const [aiOpen, setAiOpen] = useState(false);
   const [aiText, setAiText] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
@@ -52,10 +52,11 @@ function CandidateForm({ initial, users, onCancel, onSubmit, saving, error }) {
       }
     >
       <FormError error={error} />
-      {allows('resume_ai') && (
+      {(
+
         <div className="mb-4 rounded-lg border border-line bg-wash p-3">
           {!aiOpen ? (
-            <button type="button" className="text-sm font-semibold text-brand hover:underline" onClick={() => setAiOpen(true)}>✨ Fill from a pasted resume (AI)</button>
+            <button type="button" data-testid="resume-ai-open" data-plan-locked={ai.locked ? ai.minPlan : undefined} className="text-sm font-semibold text-brand hover:underline min-h-[40px] inline-flex items-center" onClick={() => (ai.locked ? ai.open() : setAiOpen(true))}>✨ Fill from a pasted resume (AI){ai.locked && <PlanBadge gate="resume_ai" />}</button>
           ) : (
             <>
               <FormError error={aiErr} />

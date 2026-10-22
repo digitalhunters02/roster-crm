@@ -206,11 +206,15 @@ try {
     check('essential: offices, connections and API cards explain they are Complete', (await page.locator('[data-testid="complete-locked"]').count()) === 3);
     await go(page, low, '/timesheets');
     await page.waitForSelector('[data-testid="timesheet-kpis"]');
-    check('essential: no payroll export button', (await page.locator('[data-testid="payroll-open"]').count()) === 0);
+    check('essential: the payroll export button stays, sealed Complete, and does not open the export', (await page.locator('[data-testid="payroll-open"][data-plan-locked="completo"]').count()) === 1);
+    await page.click('[data-testid="payroll-open"]');
+    await page.waitForSelector('[data-testid="plan-upsell"]');
+    check('essential: tapping it opens "Available on the Complete plan"', (await page.textContent('[data-testid="plan-upsell"]')).includes('Available on the Complete plan') && (await page.locator('[data-testid="payroll-download"]').count()) === 0);
+    await page.click('[data-testid="plan-upsell-close"]');
     await go(page, low, '/candidates');
     await page.waitForSelector('text=Low Person');
     await page.click('button[aria-label="Edit"]');
-    check('essential: no AI button in the candidate form', (await page.locator('[data-testid="ai-summary"]').count()) === 0);
+    check('essential: the AI button in the candidate form is sealed Complete', (await page.locator('[data-testid="ai-summary"][data-plan-locked="completo"]').count()) === 1);
     await ctx.close();
   }
 

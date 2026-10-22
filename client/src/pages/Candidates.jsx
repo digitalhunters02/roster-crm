@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
-  Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog, IconButton,
+  Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog,
   Field, TextInput, TextArea, SelectInput, FormGrid, FormError, RowActions,
 } from '../components/ui.jsx';
 import Icon from '../components/Icon.jsx';
@@ -16,9 +16,10 @@ import PhotoImportButton from '../components/PhotoImportButton.jsx';
 
 import { useT } from '../auth/i18n.js';
 import { useAuth } from '../auth/AuthContext.jsx';
-import { useBilling } from '../billing/useBilling.js';
-const SOURCE_TONE = { LinkedIn: 'blue', Referral: 'green', 'Job Board': 'amber', Sourced: 'brand' };
-const SOURCE_OPTIONS = ['LinkedIn', 'Referral', 'Job Board', 'Sourced'];
+import { GateIconButton } from '../plans/GateButton.jsx';
+import PlanBadge, { usePlanGate } from '../planKit/PlanBadge.jsx';
+const SOURCE_TONE = { 'Careers page': 'teal', LinkedIn: 'blue', Referral: 'green', 'Job Board': 'amber', Sourced: 'brand' };
+const SOURCE_OPTIONS = ['Careers page', 'LinkedIn', 'Referral', 'Job Board', 'Sourced'];
 
 const EMPTY = {
   name: '', email: '', phone: '', current_title: '', current_employer: '', skills: '',
@@ -34,6 +35,7 @@ function CandidateForm({ initial, users, onCancel, onSubmit, saving, error }) {
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resumeMsg, setResumeMsg] = useState('');
   const [resumeBusy, setResumeBusy] = useState(false);
+  const aiRead = usePlanGate('resume_ai'); // Essential and up: the AI reads the resume; below that the simple reading works and the seal offers the AI one
 
   // Simple resume reading: pulls name, contact, title, employer and skills out of pasted text (no AI, no cost).
   async function readResume() {
@@ -46,7 +48,7 @@ function CandidateForm({ initial, users, onCancel, onSubmit, saving, error }) {
         for (const k of ['name', 'email', 'phone', 'current_title', 'current_employer', 'skills', 'resume_summary']) if (r[k]) next[k] = r[k];
         return next;
       });
-      setResumeMsg(t('Fields filled in. Check them before saving.'));
+      setResumeMsg(r.engine === 'ai' ? t('Fields filled in by the AI. Check them before saving.') : t('Fields filled in. Check them before saving.'));
     } catch (e) {
       setResumeMsg(e.body?.code === 'resume_too_short' ? t('Paste the resume text (at least a few lines).') : t('Could not read this text.'));
     } finally {
@@ -79,6 +81,11 @@ function CandidateForm({ initial, users, onCancel, onSubmit, saving, error }) {
                 <Button size="sm" variant="outline" onClick={readResume} disabled={resumeBusy || !resumeText.trim()} data-testid="resume-read">{resumeBusy ? t('Reading…') : t('Read resume')}</Button>
                 {resumeMsg && <span className="text-xs text-muted" data-testid="resume-msg">{resumeMsg}</span>}
               </div>
+              {aiRead.locked && (
+                <button type="button" onClick={aiRead.open} data-testid="resume-ai-open" data-plan-locked={aiRead.minPlan} className="mt-2 inline-flex items-center min-h-[32px] text-xs font-semibold text-brand hover:underline">
+                  {t('Read with the AI for better results')}<PlanBadge gate="resume_ai" />
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -135,7 +142,6 @@ export default function Candidates() {
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
-  const { billing } = useBilling();
   const [messagesFor, setMessagesFor] = useState(null);
   const [docsFor, setDocsFor] = useState(null);
   const [office, setOffice] = useState('');
@@ -220,8 +226,8 @@ export default function Candidates() {
       key: 'actions', header: '', className: 'w-36',
       render: (r) => (
         <div className="flex items-center justify-end gap-0.5">
-          <IconButton icon="mail" title={t('Messages')} onClick={() => setMessagesFor(r)} />
-          {billing?.features?.documents === true && <IconButton icon="fileText" title={t('Documents & signatures')} onClick={() => setDocsFor(r)} />}
+          <GateIconButton gate="messaging" icon="mail" title={t('Messages')} onClick={() => setMessagesFor(r)} />
+          <GateIconButton gate="documents" icon="fileText" title={t('Documents & signatures')} onClick={() => setDocsFor(r)} />
           <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
         </div>
       ),

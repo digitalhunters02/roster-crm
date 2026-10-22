@@ -4,7 +4,7 @@
 // candidate's e-mail, phone or current employer.
 import crypto from 'node:crypto';
 import { get, all, run } from './db.js';
-import { effectivePlan, PLAN_RANK } from './billing.js';
+import { effectivePlan, allowsFeature } from './billing.js';
 import { makeLimiter } from './auth.js';
 import { readProfile } from './profile.js';
 
@@ -62,7 +62,7 @@ async function portalClient(token) {
   if (typeof token !== 'string' || token.length < 20 || token.length > 80) return null;
   const c = await get(`SELECT id, company_name, contact_name, owner_user_id FROM clients WHERE portal_token = $1 AND portal_enabled = TRUE`, [token]);
   if (!c) return null;
-  if (PLAN_RANK[await effectivePlan()] < PLAN_RANK.essencial) return null; // plan dropped: the link goes quiet
+  if (!allowsFeature(await effectivePlan(), 'portal')) return null; // plan dropped: the link goes quiet
   return c;
 }
 
@@ -174,7 +174,7 @@ export function mountPortalPublic(app, ar) {
 
 // Staff side (login + Essential plan are applied by the caller): switch the link on / rotate / off.
 export function mountPortalStaff(app, ar, { requirePlan, blockDemo }) {
-  const guard = [requirePlan('essencial')];
+  const guard = [requirePlan('portal')];
   const read = async (id) => get(`SELECT id, company_name, portal_token, portal_enabled FROM clients WHERE id = $1`, [Number(id) || 0]);
   const shape = (c) => ({ enabled: !!(c.portal_enabled && c.portal_token), token: c.portal_enabled ? c.portal_token : null, path: c.portal_enabled && c.portal_token ? `/#/portal/${c.portal_token}` : null });
 

@@ -231,14 +231,16 @@ try {
     const { ctx, page } = await open(basic, desktop);
     await go(page, basic, '/clients');
     await page.waitForSelector('text=Basic Client');
-    await page.click('button[aria-label="Client portal"]');
-    await page.waitForSelector('text=Essential plan and up');
-    check('basic: the client portal says it is part of the Essential plan', true);
+    // the buttons stay on the screen with a lock and the plan name; tapping opens "Available on the Essential plan"
+    await page.click('button[data-plan-locked="essencial"][aria-label^="Client portal"]');
+    await page.waitForSelector('[data-testid="plan-upsell"]');
+    check('basic: the client portal button opens "Available on the Essential plan"', (await page.textContent('[data-testid="plan-upsell"]')).includes('Available on the Essential plan') && (await page.textContent('[data-testid="plan-upsell"]')).includes('Client portal'));
+    await page.click('[data-testid="plan-upsell-close"]');
     await go(page, basic, '/candidates');
-    await page.click('button[aria-label="Messages"]');
-    await page.waitForSelector('[data-testid="messages-modal"]');
-    await page.waitForTimeout(600);
-    check('basic: messages are closed too', (await page.textContent('[data-testid="messages-modal"]')).includes('Essential plan') || (await page.textContent('body')).includes('Essential plan'));
+    await page.waitForSelector('button[data-plan-locked="essencial"][aria-label^="Messages"]');
+    await page.click('button[data-plan-locked="essencial"][aria-label^="Messages"]');
+    await page.waitForSelector('[data-testid="plan-upsell"]');
+    check('basic: messages are closed too, with the same window', (await page.textContent('[data-testid="plan-upsell"]')).includes('Essential plan') && (await page.locator('[data-testid="messages-modal"]').count()) === 0);
     await ctx.close();
   }
 

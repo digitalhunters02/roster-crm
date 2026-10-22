@@ -356,3 +356,27 @@ CREATE TABLE IF NOT EXISTS connector_log (
   message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------- Banco que já existia antes dos planos novos (produção anterior) ----------
+-- A tabela da assinatura já podia existir sem a coluna do período (mensal/anual): CREATE TABLE IF NOT EXISTS não a acrescenta.
+ALTER TABLE subscription ADD COLUMN IF NOT EXISTS billing_interval TEXT NOT NULL DEFAULT 'month';
+
+-- Link de aprovação das horas pelo cliente (sem login) — ver rosterPro.js. Convive com o portal do cliente (client_*): as duas
+-- formas gravam a decisão nos dois conjuntos de campos, e a tela de horas mostra os mesmos selos.
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approval_token TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approval_decision TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approved_at TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approved_by TEXT;
+ALTER TABLE timesheets_invoices ADD COLUMN IF NOT EXISTS approval_note TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS timesheets_approval_token_idx ON timesheets_invoices (approval_token) WHERE approval_token IS NOT NULL;
+
+-- Uma vez só: respostas que clientes já deram pelo link antes de existir o portal passam a aparecer nos selos "Client approved / disputed".
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM app_meta WHERE key = 'approval_link_backfill') THEN
+    UPDATE timesheets_invoices SET client_approved_at = CASE WHEN approved_at ~ '^\d{4}-\d{2}-\d{2}T' THEN approved_at::timestamptz ELSE now() END, client_approved_by = approved_by
+      WHERE approval_decision = 'approved' AND client_approved_at IS NULL;
+    UPDATE timesheets_invoices SET client_dispute_note = COALESCE(approval_note, 'Rejected from the approval link')
+      WHERE approval_decision = 'rejected' AND client_approved_at IS NULL AND client_dispute_note IS NULL;
+    INSERT INTO app_meta (key, value) VALUES ('approval_link_backfill', '1');
+  END IF;
+END $$;

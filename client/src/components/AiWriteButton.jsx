@@ -2,14 +2,13 @@
 import { useState } from 'react';
 import { Button } from './ui.jsx';
 import { useT } from '../auth/i18n.js';
-import { useBilling } from '../billing/useBilling.js';
+import PlanBadge, { usePlanGate } from '../planKit/PlanBadge.jsx';
 
 export default function AiWriteButton({ label, run, onText, disabled, testId }) {
   const { t } = useT();
-  const { billing } = useBilling();
+  const gate = usePlanGate('ai'); // Complete plan: below that the button stays, with the plan seal, and opens the "Available on the X plan" window
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  if (!billing || billing.features?.ai !== true) return null; // Complete plan only
   async function go() {
     setBusy(true); setMsg('');
     try { const r = await run(); onText(r.text); setMsg(t('Written by AI. Read it and fix anything before saving. ({used} of {limit} used this month)', { used: r.used, limit: r.limit })); }
@@ -18,7 +17,7 @@ export default function AiWriteButton({ label, run, onText, disabled, testId }) 
   }
   return (
     <div className="mb-2">
-      <Button size="sm" variant="outline" onClick={go} disabled={busy || disabled} data-testid={testId}>{busy ? t('Writing…') : label}</Button>
+      <Button size="sm" variant="outline" onClick={gate.locked ? gate.open : go} disabled={!gate.locked && (busy || disabled)} data-testid={testId} data-plan-locked={gate.locked ? gate.minPlan : undefined}>{busy ? t('Writing…') : label}{gate.locked && <PlanBadge gate="ai" inherit />}</Button>
       {msg && <p className="text-xs text-muted mt-1.5" data-testid="ai-msg">{msg}</p>}
     </div>
   );

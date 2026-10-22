@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import api, { BASE } from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
@@ -8,8 +9,42 @@ import Icon from '../components/Icon.jsx';
 import { downloadCsv } from '../csv.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { MyAccountCard, StaffCard } from '../auth/AccountPanel.jsx';
-
+import { usePlan } from '../plans/PlanContext.jsx';
+import PlanBadge, { usePlanGate } from '../planKit/PlanBadge.jsx';
+import { gateText, planStr } from '../planKit/planStrings.js';
 import { useT } from '../auth/i18n.js';
+
+function CareersLinkCard() {
+  const { allows } = usePlan();
+  const { t, lang } = useT();
+  const gate = usePlanGate('careers');
+  const on = allows('careers');
+  const url = `${window.location.origin}/#/careers`;
+  const [copied, setCopied] = useState(false);
+  return (
+    <Card className="p-1" data-testid="careers-card">
+      <CardHead title={t('Careers page')} sub={t('A public page listing your open jobs. Applicants land in the pipeline as Sourced.')} />
+      <div className="px-4 pb-4">
+        {on ? (
+          <>
+            <input readOnly value={url} onFocus={(e) => e.target.select()} aria-label={t('Careers page link')} className="w-full rounded-lg border border-line bg-wash px-3 py-2 text-xs text-ink" />
+            <div className="mt-2 flex gap-2">
+              <Button variant="brand" size="sm" onClick={() => navigator.clipboard?.writeText(url).then(() => setCopied(true)).catch(() => {})}>{copied ? t('Copied') : t('Copy link')}</Button>
+              <a className="inline-flex items-center rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-wash" href={url} target="_blank" rel="noreferrer">{t('Open page')}</a>
+            </div>
+          </>
+        ) : (
+          // Selo de plano: o que o recurso faz + selo do plano mínimo; o botão abre a janelinha "Disponível no plano X".
+          <div data-plan-notice="careers" className="flex flex-wrap items-center gap-3">
+            <p className="flex-1 min-w-[200px] text-sm text-muted m-0">{gateText('careers', lang).what}<PlanBadge gate="careers" /></p>
+            <button type="button" onClick={gate.open} data-testid="careers-locked-open" className="inline-flex items-center min-h-[40px] px-3 rounded-lg border border-line bg-surface text-sm font-semibold text-ink hover:bg-wash">{planStr(lang).details}</button>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 import PlanCard from '../billing/PlanCard.jsx';
 import { OfficesCard, ConnectionsCard, DeveloperCard } from '../components/CompleteSettings.jsx';
 import RexConnectorCard from '../components/RexConnectorCard.jsx';
@@ -123,8 +158,10 @@ function WhatsAppConnectForm({ onClose, onConnected }) {
 }
 
 export default function Settings() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const { account } = useAuth();
+  const waGate = usePlanGate('whatsapp'); // Selo de plano: o cartão do WhatsApp continua aqui; sem o plano, o botão ganha o selo e abre a janelinha
+  const smsGate = usePlanGate('messaging'); // idem para o SMS (Twilio)
   const [users, setUsers] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -173,9 +210,13 @@ export default function Settings() {
 
   const fileRef = useRef(null);
 
+  // "See plans" (from the plan window or a locked page) arrives with ?plan=1: scroll to the plan card, also when Settings is already open.
+  const location = useLocation();
   useEffect(() => {
-    if (/[?&]plan=1/.test(window.location.hash)) setTimeout(() => document.getElementById('plan')?.scrollIntoView({ block: 'start' }), 400);
-  }, []);
+    if (!/[?&]plan=1/.test(location.search)) return undefined;
+    const id = setTimeout(() => document.getElementById('plan')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 400);
+    return () => clearTimeout(id);
+  }, [location.search]);
 
   useEffect(() => {
     api.users().then(setUsers);
@@ -257,6 +298,7 @@ export default function Settings() {
         <PlanCard />
         <MyAccountCard />
         {account?.role === 'owner' && <StaffCard />}
+        <CareersLinkCard />
         <Card className="p-1">
           <CardHead
             title={t('Agency Profile')}
@@ -367,13 +409,14 @@ export default function Settings() {
                   {waBusy ? t('Disconnecting…') : t('Disconnect')}
                 </Button>
               ) : (
-                <Button size="sm" onClick={() => setWaModalOpen(true)}>{t('Connect')}</Button>
+                <Button size="sm" data-testid="whatsapp-connect" data-plan-locked={waGate.locked ? waGate.minPlan : undefined} className="min-h-[40px]" onClick={() => (waGate.locked ? waGate.open() : setWaModalOpen(true))}>{t('Connect')}{waGate.locked && <PlanBadge gate="whatsapp" inherit />}</Button>
               )
             }
           />
           <div className="px-5 pb-5 text-sm">
-            {!waStatus && <p className="text-muted">{t('Checking connection…')}</p>}
-            {waStatus && waStatus.connected && (
+            {waGate.locked && <p className="text-muted" data-plan-notice="whatsapp">{gateText('whatsapp', lang).what}</p>}
+            {!waGate.locked && !waStatus && <p className="text-muted">{t('Checking connection…')}</p>}
+            {!waGate.locked && waStatus && waStatus.connected && (
               <div className="flex items-center gap-2.5">
                 <span className="w-8 h-8 rounded-lg bg-greenTint text-green flex items-center justify-center flex-shrink-0">
                   <Icon name="phoneCall" size={15} />
@@ -384,7 +427,7 @@ export default function Settings() {
                 </div>
               </div>
             )}
-            {waStatus && !waStatus.connected && (
+            {!waGate.locked && waStatus && !waStatus.connected && (
               <p className="text-muted">{t('Not connected — paste your Meta WhatsApp Business credentials to start sending and receiving messages from the WhatsApp page.')}</p>
             )}
           </div>
@@ -403,13 +446,14 @@ export default function Settings() {
               !owner ? null : smsStatus && smsStatus.connected ? (
                 <Button variant="outline" size="sm" onClick={disconnectSms} disabled={smsBusy}>{smsBusy ? t('Disconnecting…') : t('Disconnect')}</Button>
               ) : (
-                <Button size="sm" onClick={() => setSmsModal(true)} data-testid="sms-connect-open">{t('Connect')}</Button>
+                <Button size="sm" onClick={() => (smsGate.locked ? smsGate.open() : setSmsModal(true))} data-testid="sms-connect-open" data-plan-locked={smsGate.locked ? smsGate.minPlan : undefined} className="min-h-[40px]">{t('Connect')}{smsGate.locked && <PlanBadge gate="messaging" inherit />}</Button>
               )
             }
           />
           <div className="px-5 pb-5 text-sm">
-            {!smsStatus && <p className="text-muted">{t('Checking connection…')}</p>}
-            {smsStatus && smsStatus.connected && (
+            {smsGate.locked && <p className="text-muted" data-plan-notice="messaging">{gateText('messaging', lang).what}</p>}
+            {!smsGate.locked && !smsStatus && <p className="text-muted">{t('Checking connection…')}</p>}
+            {!smsGate.locked && smsStatus && smsStatus.connected && (
               <div className="flex items-center gap-2.5">
                 <span className="w-8 h-8 rounded-lg bg-greenTint text-green flex items-center justify-center flex-shrink-0"><Icon name="phoneCall" size={15} /></span>
                 <div>
@@ -418,7 +462,7 @@ export default function Settings() {
                 </div>
               </div>
             )}
-            {smsStatus && !smsStatus.connected && (
+            {!smsGate.locked && smsStatus && !smsStatus.connected && (
               <p className="text-muted">{t('Not connected. Paste your Twilio Account SID, Auth Token and phone number to send texts from the Candidates page.')}</p>
             )}
           </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useBilling } from '../billing/useBilling.js';
+import { GateIconButton } from '../plans/GateButton.jsx';
 import ClientPortalModal from '../components/ClientPortalModal.jsx';
 import DocsSignaturesModal from '../components/DocsSignaturesModal.jsx';
 import OfficeField, { OfficeFilter } from '../offices/OfficeField.jsx';
@@ -90,7 +90,6 @@ export default function Clients() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
   const [portalFor, setPortalFor] = useState(null);
-  const { billing } = useBilling();
   const [signFor, setSignFor] = useState(null);
   const [office, setOffice] = useState('');
 
@@ -174,8 +173,8 @@ export default function Clients() {
       key: 'actions', header: '', className: 'w-36',
       render: (r) => (
         <div className="flex items-center justify-end gap-0.5">
-          <IconButton icon="arrowUpRight" title={t('Client portal')} onClick={() => setPortalFor(r)} />
-          {billing?.features?.signatures === true && <IconButton icon="fileText" title={t('Signatures')} onClick={() => setSignFor(r)} />}
+          <GateIconButton gate="portal" icon="arrowUpRight" title={t('Client portal')} onClick={() => setPortalFor(r)} />
+          <GateIconButton gate="signatures" icon="fileText" title={t('Signatures')} onClick={() => setSignFor(r)} />
           <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
         </div>
       ),

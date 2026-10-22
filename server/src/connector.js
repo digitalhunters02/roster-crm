@@ -190,7 +190,7 @@ async function turnOn({ baseUrl, apiKey }) {
 }
 
 export function mountConnector(app, ar) {
-  const guard = [requireOwner, blockDemo, requirePlan('essencial')];
+  const guard = [requireOwner, blockDemo, requirePlan('connector')];
   app.get('/api/connector/status', requireOwner, ar(async (_req, res) => res.json(await statusPayload())));
 
   // Liga com a chave colada (rex_live_…) — ou só desliga, sem mexer na chave.

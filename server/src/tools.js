@@ -17,19 +17,20 @@ const STOP = new Set('a an and are as at be by for from in is it of on or the to
 const words = (s) => [...new Set(String(s || '').toLowerCase().split(/[^a-z0-9+#.]+/).map((w) => w.replace(/^[.]+|[.]+$/g, '')).filter((w) => w.length > 2 && !STOP.has(w)))];
 
 export function mountTools(app, ar, { requirePlan, blockDemo, requireOwner }) {
-  const complete = requirePlan('completo');
+  // Each area asks for its own feature (planConfig.js FEATURE_MIN_PLAN), so the plan map has one place to change.
+  const documents = requirePlan('documents'), payroll = requirePlan('payroll'), suggestions = requirePlan('suggestions'), offices = requirePlan('offices'), aiPlan = requirePlan('ai');
 
   // ---------------- documents with expiry (reminder list only) ----------------
   app.get('/api/documents/meta', ar(async (_req, res) => res.json({ types: DOC_TYPES, statuses: DOC_STATUSES })));
 
-  app.get('/api/documents/expiring', complete, ar(async (req, res) => {
+  app.get('/api/documents/expiring', documents, ar(async (req, res) => {
     const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
     const limit = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
     res.json(await all(`SELECT d.*, c.name AS candidate_name FROM candidate_documents d JOIN candidates c ON c.id = d.candidate_id
       WHERE d.expires_on IS NOT NULL AND d.expires_on <= $1 ORDER BY d.expires_on, d.id LIMIT 200`, [limit]));
   }));
 
-  app.get('/api/candidates/:id/documents', complete, ar(async (req, res) => {
+  app.get('/api/candidates/:id/documents', documents, ar(async (req, res) => {
     res.json(await all(`SELECT * FROM candidate_documents WHERE candidate_id = $1 ORDER BY id`, [Number(req.params.id) || 0]));
   }));
 
@@ -39,7 +40,7 @@ export function mountTools(app, ar, { requirePlan, blockDemo, requireOwner }) {
     const expires_on = b?.expires_on ? String(b.expires_on).slice(0, 10) : null;
     return { doc_type, status, expires_on, notes: String(b?.notes || '').trim().slice(0, 300) || null, bad: !doc_type ? 'Choose the document type.' : expires_on && !validDay(expires_on) ? 'The expiry date is not valid.' : '' };
   }
-  app.post('/api/candidates/:id/documents', complete, blockDemo, ar(async (req, res) => {
+  app.post('/api/candidates/:id/documents', documents, blockDemo, ar(async (req, res) => {
     const cand = await get(`SELECT id FROM candidates WHERE id = $1`, [Number(req.params.id) || 0]);
     if (!cand) return res.status(404).json({ error: 'not found' });
     const d = docInput(req.body);
@@ -47,7 +48,7 @@ export function mountTools(app, ar, { requirePlan, blockDemo, requireOwner }) {
     const r = await run(`INSERT INTO candidate_documents (candidate_id, doc_type, status, expires_on, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *`, [cand.id, d.doc_type, d.status, d.expires_on, d.notes]);
     res.status(201).json(r.rows[0]);
   }));
-  app.put('/api/documents/:id', complete, blockDemo, ar(async (req, res) => {
+  app.put('/api/documents/:id', documents, blockDemo, ar(async (req, res) => {
     const id = Number(req.params.id) || 0;
     const cur = await get(`SELECT * FROM candidate_documents WHERE id = $1`, [id]);
     if (!cur) return res.status(404).json({ error: 'not found' });
@@ -58,7 +59,7 @@ export function mountTools(app, ar, { requirePlan, blockDemo, requireOwner }) {
     if (d.expires_on !== cur.expires_on) await run(`DELETE FROM automation_runs WHERE related_type = 'document' AND related_id = $1`, [id]);
     res.json(r.rows[0]);
   }));
-  app.delete('/api/documents/:id', complete, blockDemo, ar(async (req, res) => {
+  app.delete('/api/documents/:id', documents, blockDemo, ar(async (req, res) => {
     const r = await run(`DELETE FROM candidate_documents WHERE id = $1`, [Number(req.params.id) || 0]);
     if (!r.rowCount) return res.status(404).json({ error: 'not found' });
     res.status(204).end();
@@ -67,7 +68,7 @@ export function mountTools(app, ar, { requirePlan, blockDemo, requireOwner }) {
   // ---------------- payroll hours export (CSV) ----------------
   // Hours and gross pay (hours x pay rate) for the payroll provider. It is an export of numbers the agency typed:
   // Roster does not compute taxes, withholdings or overtime rules.
-  app.get('/api/timesheets/payroll-export', complete, ar(async (req, res) => {
+  app.get('/api/timesheets/payroll-export', payroll, ar(async (req, res) => {
     const from = validDay(req.query.from) ? req.query.from : '0000-01-01';
     const to = validDay(req.query.to) ? req.query.to : '9999-12-31';
     const rows = await all(`
@@ -84,7 +85,7 @@ export function mountTools(app, ar, { requirePlan, blockDemo, requireOwner }) {
   }));
 
   // ---------------- suggested candidates for a job (keyword match, no AI cost) ----------------
-  app.get('/api/jobs/:id/suggestions', complete, ar(async (req, res) => {
+  app.get('/api/jobs/:id/suggestions', suggestions, ar(async (req, res) => {
     const job = await get(`SELECT j.*, c.industry AS client_industry FROM jobs j JOIN clients c ON c.id = j.client_id WHERE j.id = $1`, [Number(req.params.id) || 0]);
     if (!job) return res.status(404).json({ error: 'not found' });
     const jobWords = words(`${job.title} ${job.title} ${job.notes || ''} ${job.location || ''}`);
@@ -107,26 +108,26 @@ export function mountTools(app, ar, { requirePlan, blockDemo, requireOwner }) {
       (SELECT COUNT(*) FROM clients c WHERE c.office_id = o.id) AS client_count FROM offices o ORDER BY o.name`));
   }));
   const officeInput = (b) => ({ name: String(b?.name || '').trim().slice(0, 80), city: String(b?.city || '').trim().slice(0, 80) || null });
-  app.post('/api/offices', complete, requireOwner, ar(async (req, res) => {
+  app.post('/api/offices', offices, requireOwner, ar(async (req, res) => {
     const o = officeInput(req.body);
     if (!o.name) return res.status(400).json({ error: 'Give the office a name.', code: 'name_required' });
     if (await get(`SELECT 1 FROM offices WHERE lower(name) = lower($1)`, [o.name])) return res.status(409).json({ error: 'There is already an office with that name.', code: 'duplicate' });
     const r = await run(`INSERT INTO offices (name, city) VALUES ($1, $2) RETURNING *`, [o.name, o.city]);
     res.status(201).json(r.rows[0]);
   }));
-  app.put('/api/offices/:id', complete, requireOwner, ar(async (req, res) => {
+  app.put('/api/offices/:id', offices, requireOwner, ar(async (req, res) => {
     const o = officeInput(req.body);
     if (!o.name) return res.status(400).json({ error: 'Give the office a name.', code: 'name_required' });
     const r = await run(`UPDATE offices SET name = $2, city = $3 WHERE id = $1 RETURNING *`, [Number(req.params.id) || 0, o.name, o.city]);
     if (!r.rowCount) return res.status(404).json({ error: 'not found' });
     res.json(r.rows[0]);
   }));
-  app.delete('/api/offices/:id', complete, requireOwner, ar(async (req, res) => {
+  app.delete('/api/offices/:id', offices, requireOwner, ar(async (req, res) => {
     const r = await run(`DELETE FROM offices WHERE id = $1`, [Number(req.params.id) || 0]); // records keep existing, just without an office
     if (!r.rowCount) return res.status(404).json({ error: 'not found' });
     res.status(204).end();
   }));
-  app.put('/api/users/:id/office', complete, requireOwner, ar(async (req, res) => {
+  app.put('/api/users/:id/office', offices, requireOwner, ar(async (req, res) => {
     const officeId = req.body?.office_id ? Number(req.body.office_id) : null;
     if (officeId && !(await get(`SELECT 1 FROM offices WHERE id = $1`, [officeId]))) return res.status(400).json({ error: 'Office not found.', code: 'office_not_found' });
     const r = await run(`UPDATE users SET office_id = $2 WHERE id = $1 RETURNING id, office_id`, [Number(req.params.id) || 0, officeId]);
@@ -136,7 +137,7 @@ export function mountTools(app, ar, { requirePlan, blockDemo, requireOwner }) {
 
   // ---------------- AI ----------------
   app.get('/api/ai/status', ar(async (_req, res) => res.json({ configured: ai.isConfigured(), ...(await ai.usage()) })));
-  const aiGate = [complete, blockDemo];
+  const aiGate = [aiPlan, blockDemo];
   const needAi = (_req, res, next) => (ai.isConfigured() ? next() : res.status(503).json({ error: 'The AI is not turned on on this server yet. Ask your administrator.', code: 'ai_not_configured' }));
   const aiFail = (res, e) => res.status(e.status || 502).json({ error: e.message, code: e.code || 'ai_failed' });
 

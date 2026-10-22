@@ -3,9 +3,12 @@
 // owner can start a purchase or open the portal.
 import { get } from './db.js';
 import { requireOwner } from './auth.js';
+import { isOwnerEmail } from './owner.js';
+import { blockInPreview } from './previewPlan.js';
 import {
-  PLAN_RANK, PLAN_LABELS, PLAN_LIMITS, ANNUAL_DISCOUNT, isConfigured, effectivePlan, getSubscription, licensedPlan, getPaymentLinks,
-  yearlyAvailable, priceTable, featuresFor, createCheckoutSession, createPortalSession, handleWebhook, normalizeInterval,
+  PLAN_RANK, PLAN_LABELS, PLAN_LIMITS, FEATURE_MIN_PLAN, ANNUAL_DISCOUNT, isConfigured, effectivePlan, realPlan, previewingPlan, getSubscription,
+  licensedPlan, getPaymentLinks, yearlyAvailable, priceTable, featuresFor, createCheckoutSession, createPortalSession, handleWebhook,
+  normalizeInterval, publicCatalog, publicGates, seatGateFor,
 } from './billing.js';
 
 const lim = (n) => (n === Infinity ? null : n);
@@ -25,6 +28,7 @@ export async function billingStatus() {
   const sub = await getSubscription();
   const licensed = licensedPlan();
   const limits = Object.fromEntries(Object.entries(PLAN_LIMITS[plan]).map(([k, v]) => [k, lim(v)]));
+  const used = await usage();
   return {
     configured: isConfigured(),
     plan,
@@ -40,9 +44,17 @@ export async function billingStatus() {
     paymentLinks: getPaymentLinks('month'),
     paymentLinksYearly: getPaymentLinks('year'),
     limits,
-    usage: await usage(),
+    usage: used,
     features: featuresFor(plan),
+    featureMinPlan: FEATURE_MIN_PLAN,
     order: Object.keys(PLAN_RANK),
+    // Selo de plano (menu, botões, janelinha "Disponível no plano X"): a mesma fonte para tudo; o front só consome.
+    // previewPlan = plano que o dono da plataforma está VENDO ("Ver como plano"); realPlan = o plano de verdade da instalação.
+    previewPlan: previewingPlan(),
+    realPlan: await realPlan(),
+    gates: publicGates(plan),
+    catalog: publicCatalog(),
+    userGate: seatGateFor(plan, used.users),
   };
 }
 
@@ -52,6 +64,12 @@ function baseUrl(req) {
 
 // Stripe calls this directly: mounted before the login gate.
 export function publicBillingRoutes(app, ar) {
+  // Planos à venda (preço, o que cada plano acrescenta e o plano mínimo de cada recurso), sem login: a mesma fonte do app logado.
+  app.get('/api/public/plans', ar(async (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({ catalog: publicCatalog(), gates: publicGates() });
+  }));
+
   app.post('/api/billing/webhook', ar(async (req, res) => {
     try {
       await handleWebhook(req.rawBody || '', req.headers['stripe-signature']);
@@ -64,9 +82,10 @@ export function publicBillingRoutes(app, ar) {
 }
 
 export function billingRoutes(app, ar) {
-  app.get('/api/billing/status', ar(async (_req, res) => res.json(await billingStatus())));
+  // `owner` = a conta é de dono da plataforma (OWNER_EMAILS): o front mostra o "Ver como plano".
+  app.get('/api/billing/status', ar(async (req, res) => res.json({ ...(await billingStatus()), owner: isOwnerEmail(req.account?.email) })));
 
-  app.post('/api/billing/checkout', requireOwner, ar(async (req, res) => {
+  app.post('/api/billing/checkout', requireOwner, blockInPreview, ar(async (req, res) => {
     if (licensedPlan()) return res.status(400).json({ error: 'Your plan is managed by Impact Digital. Contact support to change it.', code: 'plan_licensed' });
     const plan = req.body?.plan;
     if (!PLAN_RANK[plan]) return res.status(400).json({ error: 'Unknown plan.', code: 'unknown_plan' });
@@ -78,7 +97,7 @@ export function billingRoutes(app, ar) {
     }
   }));
 
-  app.post('/api/billing/portal', requireOwner, ar(async (req, res) => {
+  app.post('/api/billing/portal', requireOwner, blockInPreview, ar(async (req, res) => {
     try {
       res.json({ url: await createPortalSession({ frontendBaseUrl: baseUrl(req) }) });
     } catch (e) {

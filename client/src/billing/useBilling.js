@@ -9,14 +9,23 @@ let loading = false;
 const listeners = new Set();
 const emit = () => listeners.forEach((l) => l());
 
-export async function refreshBilling() {
-  if (!getToken()) return null;
+let inflight = null;
+export function refreshBilling() {
+  if (!getToken()) return Promise.resolve(null);
+  if (inflight) return inflight; // several screens asking at the same moment share one request
   loading = true;
-  try { state = await api.billingStatus(); } catch { /* keep the last value */ }
-  loading = false;
-  emit();
-  return state;
+  inflight = (async () => {
+    try { state = await api.billingStatus(); } catch { /* keep the last value */ }
+    loading = false;
+    inflight = null;
+    emit();
+    return state;
+  })();
+  return inflight;
 }
+
+// Signed out (or another login): forget the last answer.
+export function clearBilling() { state = null; emit(); }
 
 export function useBilling() {
   const billing = useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, () => state, () => null);
@@ -24,6 +33,5 @@ export function useBilling() {
   return { billing, refresh: refreshBilling };
 }
 
-// Lowest plan label for a locked area (matches FEATURE_MIN_PLAN on the server).
-export const FEATURE_PLAN = { timesheets: 'essencial', whatsapp: 'essencial', portal: 'essencial', messaging: 'essencial', ai: 'completo', signatures: 'completo', documents: 'completo', payroll: 'completo', api: 'completo', offices: 'completo' };
+// Plan names as shown in English (the screens translate them with t()).
 export const PLAN_NAMES = { basico: 'Basic', essencial: 'Essential', completo: 'Complete' };

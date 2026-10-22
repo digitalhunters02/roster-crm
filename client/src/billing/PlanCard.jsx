@@ -10,7 +10,7 @@ const PLAN_ORDER = ['basico', 'essencial', 'completo'];
 // What each plan includes (the lists are cumulative; "Everything in ..." keeps them short).
 const FEATURES = {
   basico: ['Clients, jobs, candidates, pipeline and interviews', 'Up to {users} logins, {candidates} candidates, {openJobs} open jobs', 'Import from photo and simple resume reading', '2 automations that really run', 'English, Portuguese and Spanish'],
-  essencial: ['Everything in Basic', 'Up to {users} logins, unlimited candidates and open jobs', 'Timesheets, margin per placement and invoices', 'WhatsApp inbox for the whole team', 'Unlimited automations'],
+  essencial: ['Everything in Basic', 'Up to {users} logins, unlimited candidates and open jobs', 'Timesheets, margin per placement and invoices', 'Client portal and a link for clients to approve hours', 'E-mail and SMS with templates, WhatsApp inbox for the whole team', 'Careers page and resume reading by AI', 'Optional connection to Rex', 'Unlimited automations'],
   completo: ['Everything in Essential', 'Up to {users} logins', 'AI profiles and job posts, suggested candidates', 'E-signature with your Documenso account', 'Documents with expiry reminders and payroll hours export', 'API keys, webhooks and several offices'],
 };
 const LIMITS_BY_PLAN = { basico: { users: 3, candidates: '1,000', openJobs: 25 }, essencial: { users: 8 }, completo: { users: 25 } };
@@ -51,7 +51,9 @@ export default function PlanCard() {
   const hasYearly = Object.values(billing.yearlyAvailable || {}).some(Boolean);
   const paying = billing.source === 'stripe';
   const licensed = billing.source === 'licensed';
-  const showToggle = billing.configured && !licensed && !paying && hasYearly;
+  // The platform owner is only LOOKING at this plan ("View as plan"): no buying and no billing portal until they go back.
+  const previewing = !!billing.previewPlan;
+  const showToggle = billing.configured && !licensed && !paying && hasYearly && !previewing;
   const yearly = (showToggle && interval === 'year') || (paying && billing.interval === 'year');
 
   async function subscribe(plan) {
@@ -75,9 +77,10 @@ export default function PlanCard() {
       <CardHead
         title={t('Plan & billing')}
         sub={licensed ? t('Your plan is managed by Impact Digital.') : paying ? `${t(PLAN_NAMES[billing.plan])} · ${billing.interval === 'year' ? t('yearly') : t('monthly')}` : t('Choose the plan that fits your agency')}
-        action={owner && billing.hasCustomer ? <Button size="sm" variant="outline" onClick={portal} disabled={!!busy}>{t('Manage billing and invoices')}</Button> : null}
+        action={owner && billing.hasCustomer && !previewing ? <Button size="sm" variant="outline" onClick={portal} disabled={!!busy}>{t('Manage billing and invoices')}</Button> : null}
       />
       <div className="px-5 pb-5 space-y-4">
+        {previewing && <p className="rounded-md bg-amber-50 text-amber-800 text-sm px-3 py-2" data-testid="plans-preview-note">{t('You are looking at Roster as the {plan} plan. Buying and billing are paused until you go back to your own plan.', { plan: t(PLAN_NAMES[billing.previewPlan]) })}</p>}
         {/billing=success/.test(window.location.hash) && <p className="rounded-md bg-greenTint text-green text-sm px-3 py-2" data-testid="billing-success">{t('Payment received. Updating your plan…')}</p>}
         {billing.status === 'past_due' && <p className="rounded-md bg-roseTint text-rose text-sm px-3 py-2">{t('Your last payment failed. Update your payment method to keep your plan.')}</p>}
         {billing.status === 'canceled' && <p className="rounded-md bg-amber-50 text-amber-800 text-sm px-3 py-2">{t('Your subscription ended. You are on the Basic limits; nothing was deleted.')}</p>}
@@ -93,24 +96,24 @@ export default function PlanCard() {
         )}
         <div className="grid gap-3 md:grid-cols-3" data-testid="plans-grid">
           {PLAN_ORDER.map((p) => {
-            const current = billing.plan === p && (licensed || paying || !billing.configured);
+            const current = billing.plan === p && !previewing && (licensed || paying || !billing.configured);
             const price = billing.prices[p];
             const showYear = yearly;
             const rank = PLAN_ORDER.indexOf(p) - PLAN_ORDER.indexOf(billing.plan);
             return (
-              <div key={p} className={`rounded-lg border p-4 ${current ? 'border-brand ring-1 ring-brand' : 'border-line'}`}>
+              <div key={p} data-plan-card={p} className={`rounded-lg border p-4 ${current ? 'border-brand ring-1 ring-brand' : 'border-line'}`}>
                 <div className="flex items-baseline justify-between"><h3 className="text-base font-semibold text-ink">{t(PLAN_NAMES[p])}</h3>{current && <Badge tone="brand">{t('Your plan')}</Badge>}</div>
                 <div className="my-2 text-3xl font-bold text-ink" data-testid={`plan-price-${p}`}>{showYear ? usd(price.year) : usd(price.month)}<span className="text-sm font-normal text-muted">/{showYear ? t('year') : t('month')}</span></div>
                 {showYear && <p className="-mt-1 mb-2 text-xs text-muted">{t('equals {0}/month · 10% off', { 0: usd(Math.round(price.year / 12 * 100) / 100) })}</p>}
                 <ul className="space-y-1.5 text-sm text-muted mb-3">
                   {FEATURES[p].map((f) => <li key={f}>✓ {t(f, LIMITS_BY_PLAN[p])}</li>)}
                 </ul>
-                {owner && !licensed && !current && billing.configured && !paying && (
+                {owner && !licensed && !current && billing.configured && !paying && !previewing && (
                   <Button className="w-full" onClick={() => subscribe(p)} disabled={!!busy || (showYear && !billing.yearlyAvailable?.[p])} data-testid={`subscribe-${p}`}>
                     {showYear && !billing.yearlyAvailable?.[p] ? t('Yearly coming soon') : t('Subscribe')}
                   </Button>
                 )}
-                {owner && paying && !current && billing.hasCustomer && (
+                {owner && paying && !current && billing.hasCustomer && !previewing && (
                   <Button className="w-full" variant={rank > 0 ? 'primary' : 'outline'} onClick={portal} disabled={!!busy}>{rank > 0 ? t('Upgrade') : t('Change plan')}</Button>
                 )}
               </div>

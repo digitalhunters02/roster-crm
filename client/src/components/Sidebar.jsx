@@ -4,14 +4,16 @@ import Icon from './Icon.jsx';
 import { Avatar } from './ui.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { useT } from '../auth/i18n.js';
-import { useBilling } from '../billing/useBilling.js';
 import { useProfile } from '../profile/useProfile.js';
 import Tour from '../tour/Tour.jsx';
 import { LogOutIcon } from '../auth/AuthIcons.jsx';
+import { usePlan } from '../plans/PlanContext.jsx';
+import { usePlan as useKitPlan } from '../planKit/PlanBadge.jsx';
+import PlanBadge from '../planKit/PlanBadge.jsx';
+import PlanPreview from '../planKit/PlanPreview.jsx';
+import { NAV_GATES } from '../planKit/planConfig.js';
 
 const TOUR_KEY = 'roster-tour-done';
-// Menu entries that need a higher plan show a lock (the page itself explains the upgrade).
-const LOCKED_BY = { '/timesheets': 'timesheets', '/whatsapp': 'whatsapp' };
 
 const NAV = [
   { section: null, items: [{ to: '/', label: 'Dashboard', icon: 'dashboard' }] },
@@ -31,19 +33,19 @@ const NAV = [
   {
     section: 'Placements',
     items: [
-      { to: '/placements', label: 'Placements', icon: 'badge' },
-      { to: '/timesheets', label: 'Timesheets & Invoicing', icon: 'receipt' },
+      { to: '/placements', label: 'Placements', icon: 'badge', feature: 'placements' },
+      { to: '/timesheets', label: 'Timesheets & Invoicing', icon: 'receipt', feature: 'timesheets' },
     ],
   },
   {
     section: 'Messaging',
-    items: [{ to: '/whatsapp', label: 'WhatsApp', icon: 'phoneCall' }],
+    items: [{ to: '/whatsapp', label: 'WhatsApp', icon: 'phoneCall', feature: 'whatsapp' }],
   },
   {
     section: 'System',
     items: [
-      { to: '/automations', label: 'Automations', icon: 'zap' },
-      { to: '/reports', label: 'Reports', icon: 'barChart' },
+      { to: '/automations', label: 'Automations', icon: 'zap', feature: 'automations' },
+      { to: '/reports', label: 'Reports', icon: 'barChart', feature: 'reports' },
       { to: '/settings', label: 'Settings', icon: 'sliders' },
     ],
   },
@@ -65,10 +67,11 @@ function BrandMark({ logo, size = 32 }) {
 
 export default function Sidebar() {
   const { account, logout } = useAuth();
-  const { t } = useT();
+  const { t, lang } = useT();
   const profile = useProfile();
   const logo = profile.logo || null;
-  const { billing } = useBilling();
+  const { billing } = usePlan();
+  const kit = useKitPlan();
   const [open, setOpen] = useState(false);
   const [tour, setTour] = useState(false);
 
@@ -138,15 +141,22 @@ export default function Sidebar() {
                 </p>
               )}
               <div className="space-y-0.5">
-                {group.items.map((item) => (
+                {group.items.map((item) => {
+                  // Selo de plano: o item continua no menu; se o plano atual não libera o recurso, ganha o selo e abre a janelinha.
+                  const gate = NAV_GATES[item.to.slice(1)];
+                  const locked = !!(gate && kit.enabled && kit.gates[gate] && kit.gates[gate].locked);
+                  return (
                   <NavLink
                     key={item.to}
                     to={item.to}
                     data-tour={`nav-${item.to === '/' ? 'dashboard' : item.to.slice(1)}`}
                     end={item.to === '/'}
-                    onClick={closeDrawer}
+                    data-nav={item.to.slice(1) || 'dashboard'}
+                    data-plan-locked={locked ? kit.gates[gate].minPlan : undefined}
+                    aria-haspopup={locked ? 'dialog' : undefined}
+                    onClick={(e) => { if (locked) { e.preventDefault(); closeDrawer(); kit.openGate(gate); } else closeDrawer(); }}
                     className={({ isActive }) =>
-                      `relative flex items-center gap-2.5 px-3 py-2 rounded-md text-[13.5px] font-semibold transition-colors ${
+                      `relative flex items-center gap-2.5 px-3 py-2 min-h-[40px] rounded-md text-[13.5px] font-semibold transition-colors ${
                         isActive ? 'bg-side2 text-white' : 'text-sideText hover:bg-side2/60 hover:text-white'
                       }`
                     }
@@ -158,13 +168,12 @@ export default function Sidebar() {
                         )}
                         <Icon name={item.icon} size={16} stroke={isActive ? '#B9AFF7' : '#8A82B8'} />
                         <span className="flex-1 min-w-0 truncate">{t(item.label)}</span>
-                        {LOCKED_BY[item.to] && billing && billing.features && billing.features[LOCKED_BY[item.to]] === false && (
-                          <span title={t('Not in your plan')} data-testid={`lock-${item.to.slice(1)}`}><Icon name="lock" size={13} stroke="#8A82B8" /></span>
-                        )}
+                        {locked && <PlanBadge gate={gate} style={{ marginLeft: 0 }} />}
                       </>
                     )}
                   </NavLink>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -182,6 +191,8 @@ export default function Sidebar() {
           </div>
         </nav>
 
+        {/* "Ver como plano": só para o dono da plataforma (OWNER_EMAILS no servidor). */}
+        {billing && <div className="px-3 pt-3 border-t border-sideLine text-sideText flex-shrink-0 empty:hidden [&>div]:!mb-0"><PlanPreview theme={{ accent: '#B9AFF7', light: false }} langKey={lang} me={billing} /></div>}
         <div className="px-4 py-3.5 border-t border-sideLine flex items-center gap-2.5 flex-shrink-0">
           <NavLink to="/settings" onClick={closeDrawer} title={t('accountTitle')} className="flex items-center gap-2.5 min-w-0 flex-grow">
             <Avatar name={account?.name || 'Roster'} color="#5B4EE0" size={30} />

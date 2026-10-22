@@ -6,6 +6,8 @@ import { BRAND } from './brand.jsx';
 import PasswordField, { TextField, inputCls } from './PasswordField.jsx';
 import { ErrorNote, PrimaryButton } from './AuthShell.jsx';
 import { LogOutIcon } from './AuthIcons.jsx';
+import { usePlan } from '../plans/PlanContext.jsx';
+import PlanBadge, { usePlanGate } from '../planKit/PlanBadge.jsx';
 
 function Panel({ title, sub, action, children }) {
   return (
@@ -99,6 +101,9 @@ export function MyAccountCard() {
 export function StaffCard() {
   const { t, lang } = useT();
   const { account } = useAuth();
+  // Selo de plano: com as vagas de login do plano esgotadas, "Add staff" ganha o selo do plano que abre mais vagas e abre a janelinha.
+  const { billing } = usePlan();
+  const seat = usePlanGate(billing?.userGate || null);
   const [list, setList] = useState(null);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '' });
@@ -161,11 +166,12 @@ export function StaffCard() {
         !adding && (
           <button
             type="button"
-            onClick={() => { setAdding(true); setError(''); setNotice(''); }}
+            onClick={() => { if (seat.locked) { seat.open(); return; } setAdding(true); setError(''); setNotice(''); }}
             data-testid="add-staff"
-            className="rounded-lg bg-brand text-white px-3 py-1.5 text-xs font-semibold hover:bg-brand/90"
+            data-plan-locked={seat.locked ? seat.minPlan : undefined}
+            className="inline-flex items-center min-h-[40px] rounded-lg bg-brand text-white px-3 py-1.5 text-xs font-semibold hover:bg-brand/90"
           >
-            {t('addStaff')}
+            {t('addStaff')}{seat.locked && <PlanBadge gate={billing.userGate} inherit />}
           </button>
         )
       }

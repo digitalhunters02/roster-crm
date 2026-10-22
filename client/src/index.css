@@ -48,3 +48,5 @@ input, select, textarea { min-width: 0; max-width: 100%; }
   body.invoice-open .invoice-actions { display: none !important; }
   body.invoice-open .invoice-sheet { box-shadow: none !important; max-width: none !important; padding: 0 !important; }
 }
+/* Faixa do "Ver como plano" (src/planKit/PlanPreview.jsx): fixa no alto da coluna do conteúdo, abaixo da barra do celular. */
+.roster-previewbar .plan-previewbar { position: sticky; top: 0; z-index: 30; box-sizing: border-box; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 44px; padding: 6px max(14px, env(safe-area-inset-right, 0px)) 6px max(14px, env(safe-area-inset-left, 0px)); background: #fbbf24; color: #1a0f2b; border-bottom: 1px solid rgba(0,0,0,0.25); }

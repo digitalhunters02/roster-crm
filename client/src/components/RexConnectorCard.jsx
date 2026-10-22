@@ -5,6 +5,8 @@ import api from '../api.js';
 import { Card, CardHead, Button, Field, TextInput, FormError } from './ui.jsx';
 import { useT } from '../auth/i18n.js';
 import { useAuth } from '../auth/AuthContext.jsx';
+import { LockedNote } from '../plans/LockedNote.jsx';
+import { usePlanGate } from '../planKit/PlanBadge.jsx';
 
 export default function RexConnectorCard() {
   const { t } = useT();
@@ -18,9 +20,18 @@ export default function RexConnectorCard() {
   const [error, setError] = useState(null);
   const [note, setNote] = useState('');
   const owner = account?.role === 'owner';
+  const gate = usePlanGate('connector'); // Essential and up; below that the card stays here with the plan seal
 
   const load = () => api.connectorStatus().then((s) => { setSt(s); setBaseUrl((u) => s.baseUrl || u); }).catch(() => {});
-  useEffect(() => { if (owner) load(); }, [owner]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (owner && !gate.locked) load(); }, [owner, gate.locked]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (owner && gate.locked) {
+    return (
+      <Card className="p-1" data-testid="rex-connector">
+        <CardHead title={t('Send invoices to Rex')} sub={t('Optional. Each invoice you send here also appears in your Rex as money to receive, and is marked as paid there when you mark it paid here. Off by default.')} />
+        <LockedNote gate="connector" />
+      </Card>
+    );
+  }
   if (!owner || !st) return null;
 
   const run = async (fn) => { setBusy(true); setError(null); setNote(''); try { await fn(); } catch (e) { setError(e.message); } finally { setBusy(false); } };

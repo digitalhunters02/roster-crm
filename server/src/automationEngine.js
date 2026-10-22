@@ -6,7 +6,7 @@
 //   Daily triggers  -> runScheduled() looks for records that crossed the line; runs hourly.
 import { get, all, run } from './db.js';
 import { sendNoticeEmail } from './mailer.js';
-import { effectivePlan, PLAN_RANK } from './billing.js';
+import { effectivePlan, allowsFeature } from './billing.js';
 
 // The catalog the screen offers when creating a rule (label/description are translated on the client).
 export const TRIGGERS = {
@@ -103,7 +103,7 @@ export async function runScheduled() {
       }
     }
     // Candidate documents about to expire (Complete plan). The rule is created once, switched on, so the reminders just work.
-    if (PLAN_RANK[await effectivePlan()] >= PLAN_RANK.completo) {
+    if (allowsFeature(await effectivePlan(), 'documents')) {
       if (!(await get(`SELECT 1 FROM automations WHERE trigger_type = 'document_expiring'`))) {
         const t = TRIGGERS.document_expiring;
         await run(`INSERT INTO automations (name, trigger_desc, action_desc, active, runs_30d, trigger_type, action_type) VALUES ('Document expiring', $1, $2, 1, 0, 'document_expiring', 'notify')`, [t.desc, t.action]);

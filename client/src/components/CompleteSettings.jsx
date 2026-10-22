@@ -7,13 +7,10 @@ import { useT } from '../auth/i18n.js';
 import { useBilling } from '../billing/useBilling.js';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { loadOffices } from '../offices/useOffices.js';
+import { LockedNote } from '../plans/LockedNote.jsx';
 
 const when = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
 
-function Locked({ children }) {
-  const { t } = useT();
-  return <p className="px-5 pb-5 text-sm text-muted" data-testid="complete-locked">{children} {t('Part of the Complete plan.')}</p>;
-}
 
 export function OfficesCard() {
   const { t } = useT();
@@ -34,7 +31,7 @@ export function OfficesCard() {
   return (
     <Card className="p-1" data-testid="offices-card">
       <CardHead title={t('Offices')} sub={t('Run several locations in one account')} />
-      {!open ? <Locked>{t('Label clients, jobs, candidates and recruiters by office and see results per office.')}</Locked> : (
+      {!open ? <LockedNote gate="offices" /> : (
         <div className="px-5 pb-5 text-sm space-y-3">
           <FormError error={error} />
           {!rows ? <Spinner /> : rows.length === 0 ? <p className="text-muted">{t('No offices yet.')}</p> : (
@@ -87,7 +84,7 @@ export function ConnectionsCard() {
   return (
     <Card className="p-1" data-testid="connections-card">
       <CardHead title={t('AI & e-signature')} sub={t('Tools of the Complete plan')} />
-      {!open ? <Locked>{t('Write candidate profiles and job posts with AI, and send documents for signature.')}</Locked> : (
+      {!open ? <LockedNote gate="ai" /> : (
         <div className="px-5 pb-5 text-sm space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-ink">{t('AI writing')}</span>
@@ -133,7 +130,7 @@ export function DeveloperCard() {
   return (
     <Card className="p-1 lg:col-span-2" data-testid="developer-card">
       <CardHead title={t('API & webhooks')} sub={t('Connect Roster to your other tools (Zapier, Make, your website)')} />
-      {!(billing?.features?.api === true) ? <Locked>{t('Read your data and add candidates with an API key, and get a message at your address when something happens.')}</Locked>
+      {!(billing?.features?.api === true) ? <LockedNote gate="api" />
         : !owner ? <p className="px-5 pb-5 text-sm text-muted">{t('Only the account owner can manage API keys and webhooks.')}</p> : (
           <div className="px-5 pb-5 text-sm grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="lg:col-span-2"><FormError error={error} /></div>

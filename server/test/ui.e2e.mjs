@@ -184,8 +184,12 @@ try {
   {
     const { ctx, page, errors } = await open(basic, desktop, { lang: 'en' });
     await go(page, basic, '/');
-    await page.waitForSelector('[data-testid="lock-timesheets"]', { timeout: 10000 });
-    check('basic: Timesheets and WhatsApp show a lock in the menu', (await page.isVisible('[data-testid="lock-timesheets"]')) && (await page.isVisible('[data-testid="lock-whatsapp"]')));
+    await page.waitForSelector('[data-nav="timesheets"][data-plan-locked="essencial"]', { timeout: 10000 });
+    check('basic: Timesheets and WhatsApp carry the Essential plan seal in the menu', (await page.locator('[data-nav="timesheets"] [data-plan-badge="essencial"]').count()) === 1 && (await page.locator('[data-nav="whatsapp"] [data-plan-badge="essencial"]').count()) === 1);
+    await page.click('[data-nav="whatsapp"]');
+    await page.waitForSelector('[data-testid="plan-upsell"]');
+    check('basic: tapping a sealed menu item opens "Available on the Essential plan" with the price', (await page.textContent('[data-testid="plan-upsell"]')).includes('Available on the Essential plan') && (await page.textContent('[data-testid="plan-upsell-price"]')).includes('$149'));
+    await page.click('[data-testid="plan-upsell-close"]');
     await go(page, basic, '/timesheets');
     check('basic: the Timesheets page explains the upgrade', await page.isVisible('[data-testid="upgrade-notice"]'));
     check('basic: the notice names the Essential plan', (await page.textContent('[data-testid="upgrade-notice"]')).includes('Essential'));

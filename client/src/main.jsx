@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import App from './App.jsx';
 import { AuthProvider } from './auth/AuthContext.jsx';
+import { PlanProvider } from './plans/PlanContext.jsx';
 import './index.css';
 
 // Makes an installed copy (Add to Home Screen) pick up a new deploy on its
@@ -30,7 +31,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <HashRouter>
       <AuthProvider>
-        <App />
+        <PlanProvider>
+          <App />
+        </PlanProvider>
       </AuthProvider>
     </HashRouter>
   </React.StrictMode>

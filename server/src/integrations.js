@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { get, all, run } from './db.js';
-import { effectivePlan, PLAN_RANK } from './billing.js';
+import { effectivePlan, allowsFeature } from './billing.js';
 import { encrypt, decrypt } from './secretBox.js';
 import { makeLimiter } from './auth.js';
 
@@ -58,7 +58,7 @@ async function deliver(hook, event, body, attempt = 1) {
 // Never throws and never waits: a webhook must not slow down or break the save that caused it.
 export function emit(event, data) {
   (async () => {
-    if (PLAN_RANK[await effectivePlan()] < PLAN_RANK.completo) return;
+    if (!allowsFeature(await effectivePlan(), 'api')) return;
     const hooks = await all(`SELECT * FROM webhooks WHERE active = TRUE`);
     const body = JSON.stringify({ id: crypto.randomUUID(), event, created_at: new Date().toISOString(), data });
     for (const h of hooks) if (h.events === '*' || h.events.split(',').includes(event)) deliver(h, event, body).catch(() => {});
@@ -84,7 +84,7 @@ export function mountPublicApi(app, ar) {
     const wait = limiter.blockedFor(`k${key.id}`);
     if (wait) { res.set('Retry-After', String(wait)); return res.status(429).json({ error: 'Too many requests.', code: 'rate_limited' }); }
     limiter.hit(`k${key.id}`);
-    if (PLAN_RANK[await effectivePlan()] < PLAN_RANK.completo) return res.status(402).json({ error: 'The API is part of the Complete plan.', code: 'plan_required', requiredPlan: 'completo' });
+    if (!allowsFeature(await effectivePlan(), 'api')) return res.status(402).json({ error: 'The API is part of the Complete plan.', code: 'plan_required', requiredPlan: 'completo' });
     run(`UPDATE api_keys SET last_used_at = now() WHERE id = $1`, [key.id]).catch(() => {});
     next();
   }));
@@ -115,7 +115,7 @@ export function mountPublicApi(app, ar) {
 
 // ---------- owner screens: keys and webhooks ----------
 export function mountIntegrationsAdmin(app, ar, { requirePlan, requireOwner, blockDemo }) {
-  const gate = [requirePlan('completo'), requireOwner];
+  const gate = [requirePlan('api'), requireOwner];
 
   app.get('/api/api-keys', ...gate, ar(async (_req, res) => {
     res.json(await all(`SELECT id, name, key_prefix, created_at, last_used_at FROM api_keys WHERE revoked_at IS NULL ORDER BY id DESC`));

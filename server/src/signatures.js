@@ -66,7 +66,7 @@ export function mountSignatures(app, ar, { requirePlan, blockDemo }) {
     res.json({ connected: documenso.isConfigured(), ...(documenso.isConfigured() ? {} : { message: documenso.NOT_CONFIGURED_MESSAGE }) });
   }));
 
-  app.use('/api/signatures', requirePlan('completo'));
+  app.use('/api/signatures', requirePlan('signatures'));
 
   app.get('/api/signatures', ar(async (req, res) => {
     const where = [], params = [];

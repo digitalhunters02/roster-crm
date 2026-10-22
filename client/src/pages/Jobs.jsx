@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useBilling } from '../billing/useBilling.js';
+import { GateIconButton } from '../plans/GateButton.jsx';
 import api from '../api.js';
 import Layout from '../components/Layout.jsx';
 import {
@@ -100,7 +100,6 @@ export default function Jobs() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
 
-  const { billing } = useBilling();
   const [suggestFor, setSuggestFor] = useState(null);
   const [office, setOffice] = useState('');
 
@@ -186,7 +185,7 @@ export default function Jobs() {
       key: 'actions', header: '', className: 'w-28',
       render: (r) => (
         <div className="flex items-center justify-end gap-0.5">
-          {billing?.features?.ai === true && <IconButton icon="star" title={t('Suggested candidates')} onClick={() => setSuggestFor(r)} />}
+          <GateIconButton gate="suggestions" icon="star" title={t('Suggested candidates')} onClick={() => setSuggestFor(r)} />
           <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
         </div>
       ),

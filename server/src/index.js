@@ -9,11 +9,14 @@ import { requireAuth, requireOwner, blockDemo, bootstrapOwner, backfillRecruiter
 import { publicAuthRoutes, accountRoutes, demoTrialRoute } from './authRoutes.js';
 import { mountAdminSummary } from './adminSummary.js';
 import { publicBillingRoutes, billingRoutes, billingStatus } from './billingRoutes.js';
-import { effectivePlan, getSubscription, requirePlan, enforceLimit, getAdminSummary } from './billing.js';
+import { effectivePlan, getSubscription, requirePlan, enforceLimit, getAdminSummary, planGates, allowsFeature } from './billing.js';
+import { applyPreview, blockInPreview, blockSpendInPreview } from './previewPlan.js';
+import { mountRosterPublic, mountRosterPro } from './rosterPro.js';
 import * as automationEngine from './automationEngine.js';
 import { startDemoTrialScheduler } from './demoTrial.js';
 import { rollSampleDates } from './sampleData.js';
 import { parseResumeText } from './resumeParse.js';
+import * as ai from './ai.js';
 import { createPhotoImportRouter, initPhotoImportSchema, startPhotoBilling } from './photoImportRouter.js';
 import { sendNoticeEmail, sendEmail, isMailConfigured } from './mailer.js';
 import { PROFILE_FIELDS, profileLimit, readProfile, isHttpUrl } from './profile.js';
@@ -68,6 +71,9 @@ mountPublicApi(app, ar);
 // Machine-to-machine: Harbor reads this with X-Admin-Key (see adminSummary.js).
 mountAdminSummary(app, ar, get, getAdminSummary);
 
+// Careers page (public vacancies + applications) and the client's hours approval link: both guard themselves (plan, rate limit, token).
+mountRosterPublic(app);
+
 // -------------------- WhatsApp webhook (public) --------------------
 // Meta calls these directly (webhook verification handshake, then message
 // delivery), so they can't carry our bearer token. GET is guarded by the
@@ -96,6 +102,11 @@ app.post('/api/integrations/whatsapp/webhook', ar(async (req, res) => {
 // ==================== everything below requires a login ====================
 app.use('/api', requireAuth);
 
+// Owner of the platform looking at Roster "as another plan" (X-Preview-Plan header; ignored for any other account, see previewPlan.js).
+app.use('/api', applyPreview);
+// While previewing, nothing that spends, sends or charges runs (AI, photo reads, e-mail/SMS, e-signature, Rex connector, API keys...).
+app.use('/api', blockSpendInPreview);
+
 // "Importar de foto" (AI reads a photo/print, the person reviews before saving) + extra use by credits.
 app.use('/api/photo-import', blockDemo);
 app.use('/api/photo-import', createPhotoImportRouter({
@@ -107,14 +118,13 @@ app.use('/api/photo-import', createPhotoImportRouter({
 }));
 billingRoutes(app, ar);
 
-// ---------- plan gates and limits (see billing.js: PLAN_LIMITS / FEATURE_MIN_PLAN) ----------
-// Timesheets & invoices and the WhatsApp inbox start at the Essential plan; the Basic plan has limits on
-// users, candidates, open jobs and active automations. Without Stripe (or on Impact Digital's own demo) nothing is locked.
-app.use('/api/timesheets', requirePlan('essencial'));
-app.use(['/api/integrations/whatsapp/connect', '/api/integrations/whatsapp/conversations'], requirePlan('essencial'));
-app.post('/api/integrations/whatsapp/send', blockDemo, requirePlan('essencial'));
-app.use(['/api/message-templates', '/api/integrations/sms/connect', '/api/integrations/sms/disconnect'], requirePlan('essencial'));
-app.use('/api/candidates/:id/messages', requirePlan('essencial'));
+// ---------- plan gates and limits (planConfig.js: FEATURE_MIN_PLAN / API_GATES / PLAN_LIMITS; billing.js applies them) ----------
+// One table says which feature each route family needs (Timesheets and the WhatsApp/SMS/e-mail areas start at Essential, the payroll
+// export at Complete); the portal, e-signature, documents, AI, offices and API modules gate themselves with requirePlan('<feature>').
+// The Basic plan has limits on logins, candidates, open jobs and active automations. Without Stripe (or on Impact Digital's own demo) nothing is locked.
+app.post('/api/integrations/whatsapp/send', blockDemo);
+app.use(planGates());
+app.use('/api/candidates/:id/messages', requirePlan('messaging'));
 const countOf = (sql) => async () => Number((await get(sql)).n) || 0;
 app.post('/api/accounts', enforceLimit('users', countOf(`SELECT COUNT(*) AS n FROM accounts WHERE is_demo_trial = FALSE`)));
 app.post('/api/candidates', enforceLimit('candidates', countOf(`SELECT COUNT(*) AS n FROM candidates`)));
@@ -124,6 +134,8 @@ const automationsLimit = enforceLimit('automations', countOf(`SELECT COUNT(*) AS
 app.post('/api/automations', (req, res, next) => (req.body?.active === false ? next() : automationsLimit(req, res, next)));
 app.patch('/api/automations/:id/active', (req, res, next) => (req.body?.active ? automationsLimit(req, res, next) : next()));
 accountRoutes(app, ar);
+// Margin per client, hours + margin CSV, link for the client to approve hours (after the plan gates above).
+mountRosterPro(app);
 
 // -------------------- agency profile (name, contact, logo): stored on the server, one per installation --------------------
 app.get('/api/company-profile', ar(async (_req, res) => res.json(await readProfile())));
@@ -333,11 +345,17 @@ app.get('/api/candidates', ar(async (req, res) => {
   res.json(await all(`${CANDIDATE_SELECT} ORDER BY cd.created_at DESC`));
 }));
 
-// Resume text -> candidate fields (no AI, no cost). The recruiter reviews the result before saving.
+// Resume text -> candidate fields. Everyone gets the simple reading (no AI, no cost, works offline); from the Essential plan,
+// with the AI key turned on, the resume is read by the AI instead (and the simple reading is the fallback if the AI fails or
+// the monthly AI cap is reached). `engine` tells the screen which one answered. The recruiter reviews the result before saving.
 app.post('/api/candidates/parse-resume', ar(async (req, res) => {
-  const text = String(req.body?.text || '').trim();
+  const text = String(req.body?.text || '').replace(/\u0000/g, '').trim();
   if (text.length < 20) return res.status(400).json({ error: 'Paste the resume text (at least a few lines).', code: 'resume_too_short' });
-  res.json(parseResumeText(text));
+  const aiOn = ai.isConfigured() && allowsFeature(await effectivePlan(), 'resume_ai') && !req.previewPlan;
+  if (aiOn && text.length >= 40) {
+    try { return res.json({ ...(await ai.resumeFields(text)), engine: 'ai' }); } catch (e) { console.error('resume AI:', e.message); }
+  }
+  res.json({ ...parseResumeText(text), engine: 'simple' });
 }));
 
 // A candidate only needs a name (hourly and field workers often have no title, employer or email).
@@ -837,7 +855,7 @@ app.get('/api/integrations/whatsapp/status', ar(async (req, res) => {
   res.json({ connected: !!conn, displayPhone: conn?.display_phone || null });
 }));
 
-app.post('/api/integrations/whatsapp/connect', requireOwner, ar(async (req, res) => {
+app.post('/api/integrations/whatsapp/connect', requireOwner, blockInPreview, ar(async (req, res) => {
   const { phoneNumberId, accessToken, businessAccountId, verifyToken } = req.body || {};
   if (!phoneNumberId || !accessToken) {
     return res.status(400).json({ error: 'Phone Number ID and Access Token are required.' });
@@ -850,7 +868,7 @@ app.post('/api/integrations/whatsapp/connect', requireOwner, ar(async (req, res)
   }
 }));
 
-app.post('/api/integrations/whatsapp/disconnect', requireOwner, ar(async (req, res) => {
+app.post('/api/integrations/whatsapp/disconnect', requireOwner, blockInPreview, ar(async (req, res) => {
   await whatsapp.disconnect();
   res.status(204).end();
 }));
@@ -863,7 +881,7 @@ app.get('/api/integrations/whatsapp/conversations/:phone', ar(async (req, res) =
   res.json(await whatsapp.getConversation(req.params.phone));
 }));
 
-app.post('/api/integrations/whatsapp/send', ar(async (req, res) => {
+app.post('/api/integrations/whatsapp/send', blockInPreview, ar(async (req, res) => {
   const { to, text } = req.body || {};
   if (!to || !text) return res.status(400).json({ error: 'to and text are required' });
   try {

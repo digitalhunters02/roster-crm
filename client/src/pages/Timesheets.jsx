@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import api, { downloadAuthed } from '../api.js';
-import { useBilling } from '../billing/useBilling.js';
 import Layout from '../components/Layout.jsx';
 import {
   Card, Table, Badge, CellName, Spinner, Button, Modal, ConfirmDialog, IconButton, Kpi,
@@ -13,6 +12,7 @@ import { downloadCsv } from '../csv.js';
 
 import { useT } from '../auth/i18n.js';
 import { useFeatureGate } from '../billing/UpgradeNotice.jsx';
+import { GateButton } from '../plans/GateButton.jsx';
 const STATUS_TONE = { Draft: 'neutral', Sent: 'blue', Paid: 'green', Overdue: 'rose' };
 const STATUS_OPTIONS = ['Draft', 'Sent', 'Paid', 'Overdue'];
 
@@ -96,6 +96,63 @@ function TimesheetForm({ initial, placements, onCancel, onSubmit, saving, error 
   );
 }
 
+// Margin per client (billed - what the staff were paid) and a CSV of hours + margin. The CSV is part of the payroll export (Complete).
+function MarginCard() {
+  const { t } = useT();
+  const [m, setM] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => { api.timesheetsMargin().then(setM).catch((e) => setErr(e.message)); }, []);
+  async function download() {
+    setErr(null);
+    try { await downloadAuthed('/timesheets/export', 'roster-hours.csv'); } catch (e) { setErr(e.message); }
+  }
+  if (!m) return err ? <p className="text-sm text-rose mb-4">{err}</p> : null;
+  const tot = m.totals;
+  return (
+    <Card className="p-4 mb-4" data-testid="margin-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="text-sm font-semibold text-ink">{t('Margin per client')}</div>
+        <GateButton gate="payroll" variant="outline" size="sm" onClick={download} data-testid="margin-csv"><Icon name="download" size={14} /> {t('Hours + margin (CSV)')}</GateButton>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="text-left text-[11px] text-muted"><th className="py-1 pr-3">{t('Client')}</th><th className="pr-3">{t('Hours')}</th><th className="pr-3">{t('Billed')}</th><th className="pr-3">{t('Paid to workers')}</th><th className="pr-3">{t('Margin')}</th></tr></thead>
+          <tbody>{m.byClient.map((c) => (
+            <tr key={c.client} className="border-t border-line"><td className="py-1.5 pr-3 text-ink">{c.client}</td><td className="pr-3">{c.hours}</td><td className="pr-3">{money(c.billed)}</td><td className="pr-3">{money(c.cost)}</td><td className="pr-3 font-medium">{money(c.margin)}</td></tr>
+          ))}
+          {m.byClient.length > 1 && <tr className="border-t border-line font-semibold"><td className="py-1.5 pr-3 text-ink">{t('Total')}</td><td className="pr-3">{tot.hours}</td><td className="pr-3">{money(tot.billed)}</td><td className="pr-3">{money(tot.cost)}</td><td className="pr-3">{money(tot.margin)} ({tot.margin_pct}%)</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {err && <p className="text-xs text-rose mt-2">{err}</p>}
+    </Card>
+  );
+}
+
+// A link the client opens without a login to approve or reject one timesheet. Same answer the client portal shows (Client approved / disputed).
+function ApprovalLinkModal({ row, onClose }) {
+  const { t } = useT();
+  const [url, setUrl] = useState(null);
+  const [err, setErr] = useState(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { api.timesheetApprovalLink(row.id).then((r) => setUrl(r.url)).catch((e) => setErr(e.message)); }, [row.id]);
+  const copy = () => { navigator.clipboard?.writeText(url).then(() => setCopied(true)).catch(() => {}); };
+  return (
+    <Modal title={t('Client approval link')} sub={`${row.candidate_name} · ${row.client_name}`} onClose={onClose}
+      footer={<Button variant="outline" onClick={onClose}>{t('Close')}</Button>}>
+      <FormError error={err} />
+      {!url && !err && <Spinner />}
+      {url && (
+        <>
+          <p className="text-sm text-muted mb-2">{t('Send this link to the client. They review the hours and approve or reject, with no login. Creating a new link cancels the old one.')}</p>
+          <input readOnly value={url} onFocus={(e) => e.target.select()} className="w-full rounded-lg border border-line bg-wash px-3 py-2 text-xs text-ink" aria-label={t('Approval link')} data-testid="approval-url" />
+          <div className="mt-3"><Button variant="brand" size="sm" onClick={copy}>{copied ? t('Copied') : t('Copy link')}</Button></div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function TimesheetsInner() {
   const { t } = useT();
   const [rows, setRows] = useState(null);
@@ -106,12 +163,12 @@ function TimesheetsInner() {
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
-  const { billing } = useBilling();
   const [payrollOpen, setPayrollOpen] = useState(false);
   const [invoiceFor, setInvoiceFor] = useState(null);
   const [sendRow, setSendRow] = useState(null);
   const [sendBusy, setSendBusy] = useState(false);
   const [sendError, setSendError] = useState(null);
+  const [linkRow, setLinkRow] = useState(null);
 
   function load() {
     api.timesheets().then(setRows);
@@ -215,11 +272,12 @@ function TimesheetsInner() {
       ),
     },
     {
-      key: 'actions', header: '', className: 'w-36',
+      key: 'actions', header: '', className: 'w-44',
       render: (r) => (
         <div className="flex items-center justify-end gap-0.5">
           <IconButton icon="receipt" title={t('View invoice')} onClick={() => setInvoiceFor(r)} />
           <IconButton icon="mail" title={t('Send invoice to client')} onClick={() => { setSendError(null); setSendRow(r); }} />
+          <IconButton icon="arrowUpRight" title={r.approval_decision ? t('New approval link') : t('Client approval link')} onClick={() => setLinkRow(r)} />
           <RowActions onEdit={() => openEdit(r)} onDelete={() => { setDeleteError(null); setDeleteRow(r); }} />
         </div>
       ),
@@ -232,7 +290,7 @@ function TimesheetsInner() {
       count={rows.length}
       actions={
         <>
-          {billing?.features?.payroll === true && <Button variant="outline" onClick={() => setPayrollOpen(true)} data-testid="payroll-open"><Icon name="download" size={15} /> {t('Payroll hours')}</Button>}
+          <GateButton gate="payroll" variant="outline" onClick={() => setPayrollOpen(true)} data-testid="payroll-open"><Icon name="download" size={15} /> {t('Payroll hours')}</GateButton>
           <Button variant="outline" onClick={handleExport}><Icon name="download" size={15} /> {t('Export')}</Button>
           <Button onClick={openCreate}><Icon name="plus" size={15} /> {t('New Timesheet')}</Button>
         </>
@@ -244,6 +302,7 @@ function TimesheetsInner() {
         <Kpi label={t('Margin')} value={money(billed - cost)} />
         <Kpi label={t('Margin %')} value={billed ? `${Math.round(((billed - cost) / billed) * 100)}%` : '-'} />
       </div>
+      <MarginCard key={rows.map((r) => `${r.id}:${r.hours}:${r.amount}`).join('|')} />
       <Card>
         <Table cols={cols} rows={rows} />
       </Card>
@@ -259,6 +318,7 @@ function TimesheetsInner() {
         />
       )}
 
+      {linkRow && <ApprovalLinkModal row={linkRow} onClose={() => { setLinkRow(null); load(); }} />}
       {payrollOpen && <PayrollExport onClose={() => setPayrollOpen(false)} />}
       {invoiceFor && <InvoiceView load={() => api.timesheetInvoice(invoiceFor.id)} onClose={() => setInvoiceFor(null)} />}
 

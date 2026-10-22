@@ -2,6 +2,7 @@ import { UI_STRINGS } from '../i18n/uiStrings.js';
 import { ETAPA2_STRINGS } from '../i18n/etapa2Strings.js';
 import { ETAPA3_STRINGS } from '../i18n/etapa3Strings.js';
 import { REX_CONNECTOR_STRINGS } from '../i18n/rexConnectorStrings.js';
+import { ROSTER_PRO_STRINGS } from '../i18n/rosterProStrings.js';
 // Sign-in / account strings in English, Portuguese and Spanish.
 // Placeholders like {name} are filled by t(key, { name }).
 export const AUTH_STRINGS = {
@@ -44,6 +45,9 @@ export const AUTH_STRINGS = {
     'err.invalid_email': 'Enter a valid email address.',
     'err.network': "Can't reach the server. Check your connection and try again.",
     'err.generic': 'Something went wrong. Please try again.',
+    'err.user_limit': 'Your plan has no more staff logins. See the plans in Settings.',
+    'err.plan_limit': 'Your plan has no more staff logins. See the plans in Settings.',
+    'err.preview_readonly': 'You are viewing Roster as another plan. Go back to your own plan to add logins.',
     signOut: 'Sign out',
     accountTitle: 'My account',
     changePassword: 'Change password',
@@ -111,6 +115,9 @@ export const AUTH_STRINGS = {
     'err.invalid_email': 'Digite um e-mail válido.',
     'err.network': 'Não foi possível falar com o servidor. Verifique a conexão e tente de novo.',
     'err.generic': 'Algo deu errado. Tente de novo.',
+    'err.user_limit': 'O seu plano não tem mais vagas de login de equipe. Veja os planos em Configurações.',
+    'err.plan_limit': 'O seu plano não tem mais vagas de login de equipe. Veja os planos em Configurações.',
+    'err.preview_readonly': 'Você está vendo o Roster como outro plano. Volte ao seu plano para criar logins.',
     signOut: 'Sair',
     accountTitle: 'Minha conta',
     changePassword: 'Trocar senha',
@@ -178,6 +185,9 @@ export const AUTH_STRINGS = {
     'err.invalid_email': 'Escribe un correo válido.',
     'err.network': 'No se puede conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.',
     'err.generic': 'Algo salió mal. Inténtalo de nuevo.',
+    'err.user_limit': 'Su plan no tiene más accesos de equipo. Mire los planes en Configuración.',
+    'err.plan_limit': 'Su plan no tiene más accesos de equipo. Mire los planes en Configuración.',
+    'err.preview_readonly': 'Está viendo Roster como otro plan. Vuelva a su plan para crear accesos.',
     signOut: 'Cerrar sesión',
     accountTitle: 'Mi cuenta',
     changePassword: 'Cambiar contraseña',
@@ -216,3 +226,4 @@ Object.assign(AUTH_STRINGS.es, ETAPA2_STRINGS.es);
 // etapa 3 only fills what is still missing (it must never overwrite an older, identical key)
 for (const lang of ['pt', 'es']) for (const [k, v] of Object.entries(ETAPA3_STRINGS[lang])) if (AUTH_STRINGS[lang][k] === undefined) AUTH_STRINGS[lang][k] = v;
 for (const lang of ['pt', 'es']) for (const [k, v] of Object.entries(REX_CONNECTOR_STRINGS[lang])) if (AUTH_STRINGS[lang][k] === undefined) AUTH_STRINGS[lang][k] = v;
+for (const lang of ['pt', 'es']) for (const [k, v] of Object.entries(ROSTER_PRO_STRINGS[lang])) if (AUTH_STRINGS[lang][k] === undefined) AUTH_STRINGS[lang][k] = v;

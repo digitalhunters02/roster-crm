@@ -172,6 +172,12 @@ test('Stripe: checkout, webhook assinado, upgrade, cancelamento e resumo do Harb
   const up = { type: 'customer.subscription.updated', data: { object: { id: 'sub_1', status: 'active', metadata: { plan: 'completo' }, items: { data: [{ price: { id: 'price_c' } }] } } } };
   assert.equal((await hook(up)).status, 200);
   assert.equal((await s.call('GET', '/api/billing/status', { token: s.token })).json.plan, 'completo');
+  // troca de plano pelo portal do Stripe: o preço muda e a etiqueta da compra original continua a antiga; vale o preço
+  assert.equal((await hook({ type: 'customer.subscription.updated', data: { object: { id: 'sub_1', status: 'active', metadata: { plan: 'completo', product: 'roster' }, items: { data: [{ price: { id: 'price_e', recurring: { interval: 'month' } } }] } } } })).status, 200);
+  assert.equal((await s.call('GET', '/api/billing/status', { token: s.token })).json.plan, 'essencial', 'segue o preço, não a etiqueta antiga');
+  // assinatura antiga num preço que já não está nas variáveis: segue a etiqueta
+  assert.equal((await hook({ type: 'customer.subscription.updated', data: { object: { id: 'sub_1', status: 'active', metadata: { plan: 'completo' }, items: { data: [{ price: { id: 'price_velho_249', recurring: { interval: 'month' } } }] } } } })).status, 200);
+  assert.equal((await s.call('GET', '/api/billing/status', { token: s.token })).json.plan, 'completo');
   assert.equal((await hook({ type: 'customer.subscription.deleted', data: { object: { id: 'sub_1' } } })).status, 200);
   st = (await s.call('GET', '/api/billing/status', { token: s.token })).json;
   assert.equal(st.plan, 'basico'); assert.equal(st.features.timesheets, false);

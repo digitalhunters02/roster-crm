@@ -423,7 +423,8 @@ export async function handleWebhook(rawBody, signatureHeader) {
   } else if (event.type === 'customer.subscription.updated') {
     if (obj.metadata?.product && obj.metadata.product !== PRODUCT) return;
     const priceId = obj.items?.data?.[0]?.price?.id;
-    const plan = obj.metadata?.plan || planFromPriceId(priceId);
+    // O preço que a pessoa paga manda: trocar de plano no portal do Stripe muda o preço, mas não a etiqueta metadata.plan da compra original.
+    const plan = planFromPriceId(priceId) || obj.metadata?.plan;
     const interval = intervalFromPriceId(priceId, obj.items?.data?.[0]?.price?.recurring?.interval);
     await run(`
       UPDATE subscription SET

@@ -3,6 +3,12 @@
 // Chaves de plano seguem o portfólio (basico / essencial / completo) porque o robô de provisionamento do Harbor grava
 // LICENSED_PLAN com esses nomes e elas já estão no banco e nos metadados do Stripe; os nomes na tela são os de PLAN_LABELS.
 export const PLAN_RANK = { basico: 1, essencial: 2, completo: 3 };
+// O plano mais alto que existe, CALCULADO pelo maior valor de PLAN_RANK (nunca escrito à mão): quando um plano novo for criado
+// acima do atual, a conta do dono e a instalação própria da Impact Digital sobem sozinhas. É função (e não constante) para
+// acompanhar mudanças em PLAN_RANK, inclusive em teste.
+export function topPlan() {
+  return Object.keys(PLAN_RANK).reduce((a, b) => (PLAN_RANK[b] > PLAN_RANK[a] ? b : a));
+}
 export const PLAN_LABELS = { basico: 'Basic', essencial: 'Essential', completo: 'Complete' };
 // US$ por mês (o anual é 12 mensalidades menos 10%).
 export const PLAN_PRICES = { basico: 79, essencial: 149, completo: 269 };

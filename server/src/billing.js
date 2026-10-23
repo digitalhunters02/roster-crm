@@ -6,11 +6,11 @@ import crypto from 'node:crypto';
 import { get, run } from './db.js';
 // Planos, preços, limites e o mapa recurso -> plano mínimo vêm de planConfig.js (fonte única); aqui ficam a cobrança,
 // o plano em vigor e as barreiras. As chaves de plano continuam basico/essencial/completo (banco, metadados do Stripe, LICENSED_PLAN).
-import { PLAN_RANK, PLAN_LABELS, PLAN_PRICES, PLAN_USER_LIMITS, PLAN_LIMITS, FEATURE_MIN_PLAN, API_GATES } from './planConfig.js';
+import { PLAN_RANK, PLAN_LABELS, PLAN_PRICES, PLAN_USER_LIMITS, PLAN_LIMITS, FEATURE_MIN_PLAN, API_GATES, topPlan } from './planConfig.js';
 import { store } from './owner.js';
 import { makeGates } from './planGates.js';
 
-export { PLAN_RANK, PLAN_LABELS, PLAN_PRICES, PLAN_USER_LIMITS, PLAN_LIMITS, FEATURE_MIN_PLAN };
+export { PLAN_RANK, PLAN_LABELS, PLAN_PRICES, PLAN_USER_LIMITS, PLAN_LIMITS, FEATURE_MIN_PLAN, topPlan };
 
 // Todos os produtos da Impact Digital usam a MESMA conta do Stripe, e o Stripe manda cada evento a todos os
 // webhooks cadastrados. Cada checkout leva a etiqueta do produto e cada webhook ignora o que é de outro produto.
@@ -144,9 +144,10 @@ export function seatGateFor(plan, used) {
 }
 
 // The plan Impact Digital's provisioning robot sets (LICENSED_PLAN) on a
-// customer install, or null on any other deployment.
+// customer install, or null on any other deployment. LICENSED_PLAN=max = sempre o plano mais alto (topPlan()).
 export function licensedPlan() {
   const p = process.env.LICENSED_PLAN;
+  if (p === 'max') return topPlan();
   return p && PLAN_RANK[p] ? p : null;
 }
 
@@ -164,9 +165,9 @@ export async function realPlan() {
   // which always wins over whatever this install's own subscription row says.
   const licensed = licensedPlan();
   if (licensed) return licensed;
-  if (!isConfigured()) return 'completo';
+  if (!isConfigured()) return topPlan();
   const sub = await getSubscription();
-  if (!sub.stripe_subscription_id) return 'completo';
+  if (!sub.stripe_subscription_id) return topPlan();
   // Assinatura cancelada, sem pagamento ou vencida cai nos limites do Basic (nada é apagado; só adicionar mais é barrado).
   if (!['active', 'trialing', 'past_due'].includes(sub.status)) return 'basico';
   return PLAN_RANK[sub.plan] ? sub.plan : 'basico';

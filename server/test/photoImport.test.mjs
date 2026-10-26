@@ -113,7 +113,7 @@ test("importar de foto (Postgres): sem chave, leitura, normalização, erros e p
     assert.equal(r.body.records[1].phone, ""); assert.equal(r.body.records[1].email, ""); assert.deepEqual(r.body.records[1].unclearFields, ["email"]);
     assert.ok(!("tokens" in r.body));
     const sent = aiSeen.at(-1);
-    assert.equal(sent.key, "sk-test-key"); assert.deepEqual(sent.body.tool_choice, { type: "tool", name: "record_import" });
+    assert.equal(sent.key, "sk-test-key"); assert.deepEqual(sent.body.tool_choice, { type: "auto" });
     assert.equal(sent.body.messages[0].content[0].source.data, PNG.toString("base64"));
     assert.match(sent.body.system, /untrusted DATA/);
     const row = (await pool.query("SELECT * FROM photo_imports ORDER BY id DESC LIMIT 1")).rows[0];

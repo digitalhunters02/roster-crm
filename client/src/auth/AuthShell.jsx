@@ -1,5 +1,6 @@
 import { BRAND, BrandLogo } from './brand.jsx';
 import { useT, LANGS } from './i18n.js';
+import { SUPPORT_EMAIL, supportHref, supportText } from '../support.js';
 
 // Centered card used by Login / Reset / forced password change.
 export default function AuthShell({ subtitle, children, showLegal = true }) {
@@ -20,6 +21,9 @@ export default function AuthShell({ subtitle, children, showLegal = true }) {
             <a href="#/privacy" className="hover:text-muted">{t('privacy')}</a>
           </p>
         )}
+        <p className="text-center text-[11px] text-faint mt-3" data-testid="login-support">
+          {supportText('login', lang)} <a href={supportHref('Roster help')} className="font-medium text-muted hover:text-ink">{SUPPORT_EMAIL}</a>
+        </p>
       </div>
       <label className="mt-4 flex items-center gap-2 text-xs text-muted">
         <span>{t('language')}</span>

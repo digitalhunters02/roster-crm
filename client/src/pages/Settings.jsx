@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import SupportCard from '../components/SupportCard.jsx';
 import { useLocation } from 'react-router-dom';
 import api, { BASE } from '../api.js';
 import Layout from '../components/Layout.jsx';
@@ -294,6 +295,7 @@ export default function Settings() {
 
   return (
     <Layout title={t('Settings')}>
+      <SupportCard />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <PlanCard />
         <MyAccountCard />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { SupportNavLink } from './SupportCard.jsx';
 import { NavLink } from 'react-router-dom';
 import Icon from './Icon.jsx';
 import { Avatar } from './ui.jsx';
@@ -193,6 +194,7 @@ export default function Sidebar() {
 
         {/* "Ver como plano": só para o dono da plataforma (OWNER_EMAILS no servidor). */}
         {billing && <div className="px-3 pt-3 border-t border-sideLine text-sideText flex-shrink-0 empty:hidden [&>div]:!mb-0"><PlanPreview theme={{ accent: '#B9AFF7', light: false }} langKey={lang} me={billing} /></div>}
+<SupportNavLink />
         <div className="px-4 py-3.5 border-t border-sideLine flex items-center gap-2.5 flex-shrink-0">
           <NavLink to="/settings" onClick={closeDrawer} title={t('accountTitle')} className="flex items-center gap-2.5 min-w-0 flex-grow">
             <Avatar name={account?.name || 'Roster'} color="#5B4EE0" size={30} />

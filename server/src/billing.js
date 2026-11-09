@@ -262,7 +262,9 @@ export async function createCheckoutSession(plan, { backendBaseUrl, frontendBase
   const sub = await getSubscription();
   const params = new URLSearchParams();
   params.append('mode', 'subscription');
-  params.append('allow_promotion_codes', 'true'); // código promocional (cupom do Stripe: 3 meses, 1 ano ou para sempre)
+  // Código promocional só no plano MENSAL: no anual o Stripe aplicaria o cupom "3 meses" ao ano inteiro (a cobrança anual cai dentro dos 3 meses).
+  // O anual já tem 10% de desconto e a promoção de lançamento não soma com ele.
+  if (normalizeInterval(interval) === "month") params.append('allow_promotion_codes', 'true'); // código promocional (cupom do Stripe)
   params.append('line_items[0][price]', priceId);
   params.append('line_items[0][quantity]', '1');
   params.append('success_url', `${frontendBaseUrl}/#/settings?billing=success`);
